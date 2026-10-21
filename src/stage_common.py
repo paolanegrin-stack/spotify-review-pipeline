@@ -13,7 +13,7 @@ import time
 from . import config as C
 from .prepare import ROOT, canonical
 from .enrich import (BudgetStop, FatalAPIError, Ledger, connect, initialize,
-                     input_estimate, read_rates, snapshot, print_summary)
+                     input_estimate, read_rates, snapshot, print_summary, progress)
 
 
 def run_path(run_id):
@@ -118,7 +118,8 @@ def live_stage(path, role, cap):
         ledger = Ledger(path, cap, read_rates(), role=role, label_config=config)
         with connect(path) as db:
             ledger.export(db)
-        yield ledger
+        with progress(path):
+            yield ledger
     finally:
         lock_path.unlink(missing_ok=True)
 

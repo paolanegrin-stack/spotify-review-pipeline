@@ -37,7 +37,9 @@ classifications prevent a final records export; finish the pilot first.
 
 API cost = ((input - cached_input) × input_rate + cached_input × cached_rate
 + output × output_rate) / 1,000,000. Reasoning is already included in output.
-Missing usage/rates remain UNKNOWN. Infrastructure/local-compute cost is UNKNOWN.
+Measured cost is the known subtotal plus a count/list of calls with unknown
+usage. Estimates price all projected attempts at the known per-call average;
+that does not resolve the historical unknown charge. Infrastructure cost is UNKNOWN.
 Rates retain their source URLs/dates in usage.csv; the current values still
 carry the note "to confirm against the official page".
 
@@ -46,3 +48,9 @@ texts or all nonempty rows, verification to 2,000 reviews, grouping/memo once.
 Conservative estimates add 20% API retries. Enrich seconds per call are divided
 by the modeled workers. Time does not depend on token prices. No network, API
 key or package installation is needed for replay, and importing makes no calls.
+
+The calculator also accepts `--runs ckpt_500` for checkpoint_500.csv. Its exports
+use the ckpt_500_ prefix so the real 100-review pilot artifacts are preserved.
+Live roles use a 120-second timeout and one shared 2,000 RPM / 1,200,000 TPM
+limiter. Token admissions use the input byte bound plus output cap. The shared
+SQLite ledger reserves spend before dispatch; progress prints every 30 seconds.

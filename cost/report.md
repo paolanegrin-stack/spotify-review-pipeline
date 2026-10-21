@@ -1,7 +1,7 @@
 # Pilot cost and runtime replay
 
 Offline only. USD API costs use saved usage and editable rates.csv; infrastructure/local-compute cost is UNKNOWN.
-Reasoning tokens are reported but never billed again on top of output. Missing usage remains UNKNOWN.
+Reasoning tokens are reported but never billed again on top of output. Token/cost totals are known subtotals; calls without usage are listed separately.
 Rates and their source dates are preserved in usage.csv; current prices still require confirmation.
 
 ## pilot_cold / cold / eaeff5e227ed427bb468eee96bc2bf9a
@@ -11,16 +11,18 @@ Input SHA-256: `c884ac3b9be5066995d5063f96ad9af6e5e082975788c1684c4f6b6ea661dd0e
 
 Counts: {'completed': 100, 'pending': 0, 'quarantined': 0}; distinct nonempty texts: 100; result-cache hits: 0.
 Total wall-clock seconds: 194.620243 (saved invocation measurement).
-API subtotal USD: UNKNOWN; per 1,000 rows: UNKNOWN; per completed record: UNKNOWN.
+API known subtotal USD: 0.00541343 + 1 calls with unknown usage; per 1,000 rows (known): 0.05413430; per completed record (known): 0.0000541343.
 
 | Stage | Model / effort / prompt / batch / workers | Calls success/fail | Input / cached / output / reasoning tokens | USD | Seconds | Measured work |
 |---|---|---|---|---|---|---|
-| enrich | gpt-6-luna / none / enrich_v1 / 25 / 1 | 4/1 | UNKNOWN / UNKNOWN / UNKNOWN / UNKNOWN | UNKNOWN | 156.229045 | 100 |
-| verify | gpt-6-luna / none / verify_v1 / 20 / 1 | 1/0 | 1679 / 0 / 601 / 0 | 0.0004684 | 4.963493 | 20 |
-| group | gpt-6-luna / none / group_v1 / 20 / 1 | 7/0 | 6065 / 0 / 993 / 0 | 0.0011030 | 16.977823 | 7 |
-| memo | gpt-6-luna / low / memo_v1 / 0 / 1 | 1/1 | 6261 / 0 / 1445 / 247 | 0.0013486 | 16.271127 | 1 |
+| enrich | gpt-6-luna / none / enrich_v1 / 25 / 1 | 4/1 | 8795 / 2123 / 3610 / 0 | 0.00249343 + 1 calls with unknown usage | 156.229045 | 100 |
+| verify | gpt-6-luna / none / verify_v1 / 20 / 1 | 1/0 | 1679 / 0 / 601 / 0 | 0.0004684 + 0 calls with unknown usage | 4.963493 | 20 |
+| group | gpt-6-luna / none / group_v1 / 20 / 1 | 7/0 | 6065 / 0 / 993 / 0 | 0.0011030 + 0 calls with unknown usage | 16.977823 | 7 |
+| memo | gpt-6-luna / low / memo_v1 / 0 / 1 | 1/1 | 6261 / 0 / 1445 / 247 | 0.0013486 + 0 calls with unknown usage | 16.271127 | 1 |
 | prepare | code only | 0/0 | 0 / 0 / 0 / 0 | 0 | 0.038372 | 100 source rows |
 | rank | code only | 0/0 | 0 / 0 / 0 / 0 | 0 | 0.087963 | 100 source rows |
+
+Unknown usage (1), enrich: local-89bf6c553c8c4221b587e6107644f214
 
 ## pilot_cold / warm / 2776c3dde0fa40789c14efffdf23c28e
 
@@ -29,16 +31,17 @@ Input SHA-256: `c884ac3b9be5066995d5063f96ad9af6e5e082975788c1684c4f6b6ea661dd0e
 
 Counts: {'completed': 100, 'pending': 0, 'quarantined': 0}; distinct nonempty texts: 100; result-cache hits: 100.
 Total wall-clock seconds: 0.126043 (saved invocation measurement).
-API subtotal USD: 0; per 1,000 rows: 0; per completed record: 0.
+API known subtotal USD: 0 + 0 calls with unknown usage; per 1,000 rows (known): 0; per completed record (known): 0.
 
 | Stage | Model / effort / prompt / batch / workers | Calls success/fail | Input / cached / output / reasoning tokens | USD | Seconds | Measured work |
 |---|---|---|---|---|---|---|
-| enrich | gpt-6-luna / none / enrich_v1 / 25 / 1 | 0/0 | 0 / 0 / 0 / 0 | 0 | 0.015712 | 0 |
-| verify | gpt-6-luna / none / verify_v1 / 25 / 1 | 0/0 | 0 / 0 / 0 / 0 | 0 | 0.015411 | 0 |
-| group | gpt-6-luna / none / group_v1 / one aggregate pack / 1 | 0/0 | 0 / 0 / 0 / 0 | 0 | 0.015205 | 0 |
-| memo | gpt-6-luna / low / memo_v1 / one aggregate pack / 1 | 0/0 | 0 / 0 / 0 / 0 | 0 | 0.019581 | 0 |
+| enrich | gpt-6-luna / none / enrich_v1 / 25 / 1 | 0/0 | 0 / 0 / 0 / 0 | 0 + 0 calls with unknown usage | 0.015712 | 0 |
+| verify | gpt-6-luna / none / verify_v1 / 25 / 1 | 0/0 | 0 / 0 / 0 / 0 | 0 + 0 calls with unknown usage | 0.015411 | 0 |
+| group | gpt-6-luna / none / group_v1 / one aggregate pack / 1 | 0/0 | 0 / 0 / 0 / 0 | 0 + 0 calls with unknown usage | 0.015205 | 0 |
+| memo | gpt-6-luna / low / memo_v1 / one aggregate pack / 1 | 0/0 | 0 / 0 / 0 / 0 | 0 + 0 calls with unknown usage | 0.019581 | 0 |
 | prepare | code only | 0/0 | 0 / 0 / 0 / 0 | 0 | 0.009244 | 100 source rows |
 | rank | code only | 0/0 | 0 / 0 / 0 / 0 | 0 | 0.017447 | 100 source rows |
+
 
 Warm zero-new-enrichment check: PASS
 
@@ -46,15 +49,15 @@ Warm zero-new-enrichment check: PASS
 
 660,622 rows; 660,609 nonempty; 13 quarantined; 484,189 distinct nonempty texts.
 Budget USD: 40; modeled enrich workers: 20. Verification work: 2000; group and memo costs/time occur once.
-Enrich/verify scale by their own successful measured work counts; all measured retry/failure charges are included.
+Enrich/verify scale by their own successful work counts. Projected attempts use known per-call average cost, including retries; unknown charges are estimated, not claimed as measured.
 Prepare/rank time scales by rows. Conservative case adds 20% API retries. Local-compute price remains UNKNOWN.
 Worker speedup is modeled, not measured, and assumes no rate-limit or resource contention.
 
 | Reuse | Case | Estimated API USD | Estimated seconds | Budget |
 |---|---|---|---|---|
-| with exact reuse | base | UNKNOWN | 39186.3761532625 | UNKNOWN |
-| with exact reuse | conservative | UNKNOWN | 46856.734310213 | UNKNOWN |
-| without reuse | base | UNKNOWN | 52967.3402127125 | UNKNOWN |
-| without reuse | conservative | UNKNOWN | 63393.891181553 | UNKNOWN |
+| with exact reuse | base | 15.14043382837500000000000000 | 39186.3761532625 | within budget |
+| with exact reuse | conservative | 18.16852059405000000000000000 | 46856.734310213 | within budget |
+| without reuse | base | 20.63907033587500000000000000 | 52967.3402127125 | within budget |
+| without reuse | conservative | 24.76688440305000000000000000 | 63393.891181553 | within budget |
 
 Enrich seconds/call: 31.245809; modeled seconds/call at 20 workers: 1.56229045; modeled distinct-text throughput/second: 12.80171686385204492544904182.

@@ -6,6 +6,22 @@ from cost.calculator import bill, measure, estimates
 
 
 class CalculatorTests(unittest.TestCase):
+    def test_unknown_usage_preserves_known_subtotal_and_prices_projected_attempts(self):
+        rates = {('openai','gpt-6-luna',item):dict(price_usd_per_million_tokens=price)
+                 for item,price in (('input','.10'),('cached_input','.01'),('output','.50'))}
+        good = dict(request_id='good',role='enrich',model='gpt-6-luna',outcome='succeeded',
+                    input_tokens=100,cached_input_tokens=0,output_tokens=50,reasoning_tokens=0,review_ids=['one'])
+        bad = dict(good,request_id='timeout',outcome='failed',input_tokens=None,cached_input_tokens=None,output_tokens=None)
+        measured = measure([good,bad],[dict(stage='enrich',wall_clock_seconds=10)],rates,
+                           [dict(review_id='one',text_sha256='text',status='completed')],{})
+        self.assertEqual(measured['enrich']['cost'],Decimal('.000035'))
+        self.assertEqual(measured['enrich']['unknown_usage'],1)
+        self.assertEqual(measured['enrich']['known_calls'],1)
+        self.assertEqual(measured['enrich']['unknown_request_ids'],['timeout'])
+        for role in ('verify','group','memo'):
+            measured[role].update(work=1,calls=1,known_calls=1,cost=Decimal(0))
+        self.assertEqual(estimates(measured,Decimal(100),20)['api_cost'],Decimal('.000035')*2*484189)
+
     def test_doubling_rates_doubles_api_subtotal_leaves_time_unchanged(self):
         rates = {('openai','gpt-6-luna',item):dict(price_usd_per_million_tokens=price)
                  for item,price in (('input','.10'),('cached_input','.01'),('output','.50'))}

@@ -1,6 +1,7 @@
 """Saved-state enrichment. Import and --dry-run never create an API client."""
 
 import argparse
+from collections import deque
 from contextlib import contextmanager, closing
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import csv
@@ -25,6 +26,60 @@ class BudgetStop(Exception):
 
 class FatalAPIError(Exception):
     """Permanent request/schema rejection: stop dispatch without retrying."""
+
+
+class GlobalLimiter:
+    """One process-wide rolling-minute admission window shared by every worker/role."""
+    def __init__(self, rpm, tpm, clock=None):
+        self.rpm, self.tpm = rpm, tpm
+        self.clock = clock or time.monotonic
+        self.entries = deque()
+        self.lock = threading.Lock()
+
+    def acquire(self, tokens, stopped):
+        if tokens > self.tpm:
+            raise BudgetStop('Request token reservation exceeds global TPM limit')
+        while not stopped.is_set():
+            with self.lock:
+                now = self.clock()
+                while self.entries and self.entries[0][0] <= now-60:
+                    self.entries.popleft()
+                if len(self.entries) < self.rpm and sum(t for _,t in self.entries)+tokens <= self.tpm:
+                    self.entries.append((now,tokens))
+                    return
+                delay = max(.01,self.entries[0][0]+60-now)
+            if stopped.wait(delay):
+                break
+        raise BudgetStop('Dispatch stopped while waiting for the shared RPM/TPM limiter')
+
+
+GLOBAL_LIMITER = GlobalLimiter(C.MAX_RPM,C.MAX_TPM)
+
+
+@contextmanager
+def progress(path):
+    started, stopped = time.monotonic(), threading.Event()
+    with connect(path) as db:
+        baseline = db.execute("SELECT COUNT(*) FROM records WHERE status='completed'").fetchone()[0]
+        last = db.execute('SELECT COALESCE(MAX(rowid),0) FROM enrichment_calls').fetchone()[0]
+    def report():
+        while not stopped.wait(C.PROGRESS_INTERVAL_SECONDS):
+            with connect(path) as db:
+                counts = dict(db.execute('SELECT status,COUNT(*) FROM records GROUP BY status'))
+                calls = db.execute("SELECT event_json FROM enrichment_calls WHERE rowid>?",(last,)).fetchall()
+                spend = sum((Decimal(r[0]) for r in db.execute('SELECT liability_usd FROM enrichment_calls')),Decimal(0))
+            failed = sum(json.loads(r[0]).get('outcome')=='failed' and
+                         json.loads(r[0]).get('error')!='in_flight_or_interrupted_usage_unknown' for r in calls)
+            speed = (counts.get('completed',0)-baseline)*60/max(time.monotonic()-started,.001)
+            print(f'Progress: completed={counts.get("completed",0)} pending={counts.get("pending",0)} '
+                  f'calls={len(calls)} failed={failed} spend so far=${spend} (spent/reserved) records/minute={speed:.2f}',flush=True)
+    thread = threading.Thread(target=report,daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stopped.set()
+        thread.join()
 
 
 def object_schema(properties):
@@ -154,6 +209,7 @@ class Ledger:
         self.label_config = label_config or C.LABEL_CONFIG
         self.lock = threading.Lock()
         self.stopped = threading.Event()
+        self.limiter = GLOBAL_LIMITER
 
     def export(self, db):
         target = self.path.parent / 'calls.jsonl'
@@ -167,6 +223,9 @@ class Ledger:
         tokens = input_estimate(request)
         if tokens > C.MAX_INPUT_TOKENS:
             raise BudgetStop('Input token upper estimate exceeds configured limit')
+        # Reserve rate capacity using an input upper bound plus the full output cap.
+        # SQLite spend reservation below still occurs before the actual API dispatch.
+        self.limiter.acquire(tokens + request['max_output_tokens'],self.stopped)
         cost = (tokens * max(self.rates['input'], self.rates.get('cached_input') or self.rates['input'])
                 + C.MAX_OUTPUT_TOKENS * self.rates['output']) / Decimal(1000000)
         call_id = 'local-' + uuid.uuid4().hex
@@ -472,7 +531,7 @@ def execute_run(args):
         from dotenv import load_dotenv
         from openai import OpenAI
         load_dotenv(ROOT / '.env')
-        with OpenAI(max_retries=0, timeout=C.TIMEOUT_SECONDS) as client:
+        with progress(path), OpenAI(max_retries=0, timeout=C.TIMEOUT_SECONDS) as client:
             fatal_error = None
             # At most workers batches in flight; new submissions stop at budget boundary.
             batches = iter(rows[i:i + C.BATCH_SIZE] for i in range(0, len(rows), C.BATCH_SIZE))

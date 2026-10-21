@@ -58,6 +58,8 @@ def measure(calls, stages, rates, source, summary):
     for role in ROLES:
         attempted = [c for c in calls if c['role']==role]
         charges = [r for c in attempted for r in bill(c,rates)]
+        known_calls = [c for c in attempted if all(r['cost_usd'] is not None for r in bill(c,rates))]
+        unknown_ids = [c['request_id'] for c in attempted if c not in known_calls]
         ids = {rid for c in attempted if c['outcome']=='succeeded' for rid in c['review_ids']}
         if role=='enrich':
             work = len({r['text_sha256'] for r in source if r['review_id'] in ids and r['status']=='completed'})
@@ -71,9 +73,10 @@ def measure(calls, stages, rates, source, summary):
         prefix = '' if role=='enrich' else role.upper()+'_'
         result[role] = dict(calls=len(attempted),succeeded=sum(c['outcome']=='succeeded' for c in attempted),
                             failed=sum(c['outcome']=='failed' for c in attempted),work=work,
-                            cost=total(r['cost_usd'] for r in charges),
+                            cost=sum((r['cost_usd'] for r in charges if r['cost_usd'] is not None),Decimal(0)),
+                            known_calls=len(known_calls),unknown_usage=len(unknown_ids),unknown_request_ids=unknown_ids,
                             seconds=sum(s['wall_clock_seconds'] for s in stages if s['stage']==role),
-                            tokens={k:total(c.get(k) for c in attempted) for k in
+                            tokens={k:sum((c[k] for c in attempted if type(c.get(k)) is int),0) for k in
                                     ('input_tokens','cached_input_tokens','output_tokens','reasoning_tokens')},
                             model=summary.get('model_ids',{}).get(role,config.get(prefix+'MODEL')),
                             effort=config.get(prefix+'EFFORT'),prompt=summary.get('prompt_versions',{}).get(role),
@@ -90,7 +93,9 @@ def estimates(measured, rows, workers, reuse=True, multiplier=Decimal('1')):
     for role in ROLES:
         m = measured[role]
         factor = (Decimal(target[role])/Decimal(m['work']) if m['work'] else None) if role in ('enrich','verify') else (Decimal(1) if m['work'] else None)
-        costs.append(m['cost']*factor*multiplier if factor is not None and m['cost'] is not None else None)
+        # Use the observed known per-call average for every projected attempt.
+        priced_attempt_cost = m['cost']/m['known_calls']*m['calls'] if m['known_calls'] else None
+        costs.append(priced_attempt_cost*factor*multiplier if factor is not None and priced_attempt_cost is not None else None)
         seconds = Decimal(str(m['seconds']))*factor*multiplier if factor is not None else None
         if seconds is not None and role=='enrich':
             seconds /= workers
@@ -109,7 +114,7 @@ def run(run_ids, budget, workers):
     rates = load_rates(ROOT/'cost'/'rates.csv')
     report = ['# Pilot cost and runtime replay','',
               'Offline only. USD API costs use saved usage and editable rates.csv; infrastructure/local-compute cost is UNKNOWN.',
-              'Reasoning tokens are reported but never billed again on top of output. Missing usage remains UNKNOWN.',
+              'Reasoning tokens are reported but never billed again on top of output. Token/cost totals are known subtotals; calls without usage are listed separately.',
               'Rates and their source dates are preserved in usage.csv; current prices still require confirmation.','']
     usage, exported_calls, measured_runs, pilot = [],[],[],None
     seen_calls = set()
@@ -120,11 +125,12 @@ def run(run_ids, budget, workers):
         latest = json.loads((folder/'run_summary.json').read_text(encoding='utf-8'))
         profile = json.loads((folder/'ingestion_report.json').read_text(encoding='utf-8'))
         source = records(folder,latest['label_config'])
-        if len(source)!=100 or len({r['review_id'] for r in source})!=100:
-            raise ValueError('Pilot must contain exactly 100 unique source IDs')
-        expected = json.loads((ROOT/'data'/'manifest.json').read_text(encoding='utf-8'))['files']['cost_100.csv']['sha256']
+        source_name = {100:'cost_100.csv',500:'checkpoint_500.csv'}.get(len(source))
+        if source_name is None or len({r['review_id'] for r in source})!=len(source):
+            raise ValueError('Input must contain the 100-review pilot or 500-review checkpoint with unique source IDs')
+        expected = json.loads((ROOT/'data'/'manifest.json').read_text(encoding='utf-8'))['files'][source_name]['sha256']
         if profile['file_sha256']!=expected:
-            raise ValueError('Pilot input does not match the unchanged cost_100.csv checksum')
+            raise ValueError('Input does not match the unchanged '+source_name+' checksum')
         if pilot is not None and {r['review_id'] for r in pilot}!={r['review_id'] for r in source}:
             raise ValueError('Cold/warm runs must use the same 100 IDs')
         pilot = source
@@ -154,23 +160,28 @@ def run(run_ids, budget, workers):
                 usage.extend(dict(r,run_id=run_id,invocation_id=invocation,pilot_phase=phase) for r in bill(call,rates))
             totals = summary['totals'] if matching else {status:sum(r['status']==status for r in source) for status in ('pending','completed','quarantined')}
             seconds = summary['wall_clock_seconds'] if matching else (datetime.fromisoformat(end)-datetime.fromisoformat(start)).total_seconds()
-            cost = total(m['cost'] for role,m in measurements.items() if role in ROLES)
+            cost = sum((m['cost'] for role,m in measurements.items() if role in ROLES),Decimal(0))
+            unknown = sum(measurements[role]['unknown_usage'] for role in ROLES)
             enriched_ids = {rid for c in calls if c['role']=='enrich' for rid in c['review_ids']}
             cache_hits = sum(bool(r['cache_source_id']) for r in source if r['status']=='completed') if phase=='cold' else sum(r['status']=='completed' and r['review_id'] not in enriched_ids for r in source)
             report += [f'## {run_id} / {phase} / {invocation}','',f'Input SHA-256: `{profile["file_sha256"]}`',
-                       '100 IDs: '+', '.join(r['review_id'] for r in source),'',
+                       f'{len(source)} IDs: '+', '.join(r['review_id'] for r in source),'',
                        f'Counts: {totals}; distinct nonempty texts: {profile["distinct_nonempty_texts"]}; result-cache hits: {cache_hits}.',
                        f'Total wall-clock seconds: {seconds}'+(' (saved invocation measurement).' if matching else ' (logged stage span).'),
-                       f'API subtotal USD: {display(cost)}; per 1,000 rows: {display(None if cost is None else cost*10)}; per completed record: {display(None if cost is None or not totals.get("completed") else cost/totals["completed"])}.',
+                       f'API known subtotal USD: {cost} + {unknown} calls with unknown usage; per 1,000 rows (known): {cost*1000/len(source)}; per completed record (known): {display(None if not totals.get("completed") else cost/totals["completed"])}.',
                        '', '| Stage | Model / effort / prompt / batch / workers | Calls success/fail | Input / cached / output / reasoning tokens | USD | Seconds | Measured work |',
                        '|---|---|---|---|---|---|---|']
+            unknown_lines = []
             for role in ROLES:
                 m = measurements[role]
                 report.append(f'| {role} | {m["model"]} / {m["effort"]} / {m["prompt"]} / {m["batch"]} / {m["workers"]} | {m["succeeded"]}/{m["failed"]} | '+
                               ' / '.join(display(m['tokens'][k]) for k in ('input_tokens','cached_input_tokens','output_tokens','reasoning_tokens'))+
-                              f' | {display(m["cost"])} | {m["seconds"]} | {m["work"]} |')
+                              f' | {m["cost"]} + {m["unknown_usage"]} calls with unknown usage | {m["seconds"]} | {m["work"]} |')
+                if m['unknown_usage']:
+                    unknown_lines.append(f'Unknown usage ({m["unknown_usage"]}), {role}: '+', '.join(m['unknown_request_ids']))
             for stage in ('prepare','rank'):
-                report.append(f'| {stage} | code only | 0/0 | 0 / 0 / 0 / 0 | 0 | {measurements[stage]["seconds"]} | 100 source rows |')
+                report.append(f'| {stage} | code only | 0/0 | 0 / 0 / 0 / 0 | 0 | {measurements[stage]["seconds"]} | {len(source)} source rows |')
+            report += ['',*unknown_lines]
             if phase=='warm':
                 report += ['', 'Warm zero-new-enrichment check: '+('PASS' if measurements['enrich']['calls']==0 else 'FAIL')]
             report.append('')
@@ -179,14 +190,14 @@ def run(run_ids, budget, workers):
     report += ['## Full-run estimates','',
                '660,622 rows; 660,609 nonempty; 13 quarantined; 484,189 distinct nonempty texts.',
                f'Budget USD: {budget}; modeled enrich workers: {workers}. Verification work: 2000; group and memo costs/time occur once.',
-               'Enrich/verify scale by their own successful measured work counts; all measured retry/failure charges are included.',
+               'Enrich/verify scale by their own successful work counts. Projected attempts use known per-call average cost, including retries; unknown charges are estimated, not claimed as measured.',
                'Prepare/rank time scales by rows. Conservative case adds 20% API retries. Local-compute price remains UNKNOWN.',
                'Worker speedup is modeled, not measured, and assumes no rate-limit or resource contention.',
                '', '| Reuse | Case | Estimated API USD | Estimated seconds | Budget |', '|---|---|---|---|---|']
     cold = measured_runs[0]
     for reuse in (True,False):
         for name,multiplier in (('base',Decimal(1)),('conservative',Decimal('1.2'))):
-            estimate = estimates(cold,Decimal(100),workers,reuse,multiplier)
+            estimate = estimates(cold,Decimal(len(pilot)),workers,reuse,multiplier)
             warning = 'UNKNOWN' if estimate['api_cost'] is None else ('WARNING: OVER BUDGET' if estimate['api_cost']>budget else 'within budget')
             report.append(f'| {"with exact reuse" if reuse else "without reuse"} | {name} | {display(estimate["api_cost"])} | {display(estimate["seconds"])} | {warning} |')
     enrich = cold['enrich']
@@ -195,12 +206,13 @@ def run(run_ids, budget, workers):
         report += ['',f'Enrich seconds/call: {seconds_per_call}; modeled seconds/call at {workers} workers: {seconds_per_call/workers}; '+
                    f'modeled distinct-text throughput/second: {Decimal(enrich["work"])/enrich["calls"]*workers/seconds_per_call}.']
     output = ROOT/'cost'
-    (output/'report.md').write_text('\n'.join(report)+'\n',encoding='utf-8')
-    with (output/'usage.csv').open('w',encoding='utf-8',newline='') as stream:
+    prefix = '' if len(pilot)==100 else run_ids[0]+'_'
+    (output/(prefix+'report.md')).write_text('\n'.join(report)+'\n',encoding='utf-8')
+    with (output/(prefix+'usage.csv')).open('w',encoding='utf-8',newline='') as stream:
         writer = csv.DictWriter(stream,fieldnames=USAGE_FIELDS)
         writer.writeheader()
         writer.writerows(usage)
-    (output/'pilot_calls.jsonl').write_text(''.join(json.dumps(c,ensure_ascii=False)+'\n' for c in exported_calls),encoding='utf-8')
+    (output/(prefix+'pilot_calls.jsonl')).write_text(''.join(json.dumps(c,ensure_ascii=False)+'\n' for c in exported_calls),encoding='utf-8')
     exports = []
     for row in pilot:
         result = dict(review_id=row['review_id'],source_sha256=row['source_sha256'],status=row['status'])
@@ -213,8 +225,8 @@ def run(run_ids, budget, workers):
         else:
             raise ValueError('Pilot has pending/unclassified records; finish it before exporting final pilot_records.jsonl')
         exports.append(result)
-    (output/'pilot_records.jsonl').write_text(''.join(json.dumps(r,ensure_ascii=False)+'\n' for r in exports),encoding='utf-8')
-    print('Offline replay saved cost/report.md, usage.csv, pilot_records.jsonl and pilot_calls.jsonl.')
+    (output/(prefix+'pilot_records.jsonl')).write_text(''.join(json.dumps(r,ensure_ascii=False)+'\n' for r in exports),encoding='utf-8')
+    print('Offline replay saved '+str(output/(prefix+'report.md'))+' and matching usage/record/call exports.')
     for line in report:
         if 'WARNING' in line:
             print(line)
