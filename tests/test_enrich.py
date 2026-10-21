@@ -9,7 +9,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 from src import config as C
-from src.enrich import (BudgetStop, Ledger, build_request, connect, initialize,
+from src.enrich import (BudgetStop, FatalAPIError, Ledger, build_request, connect, initialize,
                         pending, process_batch, validate_response, run)
 
 
@@ -153,6 +153,42 @@ class StateTests(unittest.TestCase):
         events = [json.loads(s) for s in (self.path.parent / 'calls.jsonl').read_text(encoding='utf-8').splitlines()]
         self.assertEqual(len(events), 3)
         self.assertTrue(all(e['outcome'] == 'failed' and e['input_tokens'] is None for e in events))
+
+    def test_schema_rejection_logs_full_error_and_stops_once(self):
+        from openai import BadRequestError
+        import httpx2
+        body = {'error': {'message': "Invalid schema: keyword 'maxItems' is not permitted.",
+                          'param': 'text.format.schema', 'code': 'invalid_json_schema'}}
+        error = BadRequestError(body['error']['message'],
+                                response=httpx2.Response(400, request=httpx2.Request('POST', 'https://example.invalid')),
+                                body=body)
+        client = SimpleNamespace(responses=SimpleNamespace(create=lambda **kw: None))
+        with patch.object(client.responses, 'create', side_effect=error) as create, patch('src.enrich.time.sleep') as sleep:
+            with self.assertRaises(FatalAPIError):
+                process_batch([self.original], self.ledger, 'initial', client)
+            self.assertEqual(create.call_count, 1)
+            sleep.assert_not_called()
+        self.assertTrue(self.ledger.stopped.is_set())
+        events = [json.loads(s) for s in (self.path.parent / 'calls.jsonl').read_text(encoding='utf-8').splitlines()]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]['outcome'], 'failed')
+        self.assertEqual(events[0]['error'], str(error))
+        self.assertEqual(events[0]['error_body'], body)
+        self.assertIsNone(events[0]['input_tokens'])
+        with connect(self.path) as db:
+            self.assertEqual([r[0] for r in db.execute('SELECT status FROM records')], ['pending', 'pending'])
+        request, local = build_request([self.original])
+        with self.assertRaises(BudgetStop):
+            self.ledger.reserve([self.original], request, local, 'initial')
+
+    def test_real_usage_not_byte_bound_is_logged(self):
+        request, local = build_request([self.original])
+        call_id, event, reserved = self.ledger.reserve([self.original], request, local, 'initial')
+        self.assertIsNone(event['input_tokens'])
+        self.ledger.finish(call_id, event, reserved, self.response(dict(records=[result()])), None, .01)
+        saved = json.loads((self.path.parent / 'calls.jsonl').read_text(encoding='utf-8'))
+        self.assertEqual(saved['input_tokens'], 100)
+        self.assertEqual(saved['output_tokens'], 50)
 
     def test_unknown_cached_rate_keeps_reservation(self):
         request, local = build_request([self.original])

@@ -1,4 +1,4 @@
-provider,model,item,price_usd_per_million_tokens,source_url,checked_date
-openai,gpt-6-luna,input,0.10,../data/GRADING_CONTRACT.md,
-openai,gpt-6-luna,cached_input,,to verify,
-openai,gpt-6-luna,output,0.50,../data/GRADING_CONTRACT.md,
+provider,model,item,price_usd_per_million_tokens,source_url,checked_date,note
+openai,gpt-6-luna,input,0.10,https://developers.openai.com/api/docs/pricing,2026-10-20,to confirm against the official page
+openai,gpt-6-luna,cached_input,0.01,https://developers.openai.com/api/docs/pricing,2026-10-20,to confirm against the official page
+openai,gpt-6-luna,output,0.50,https://developers.openai.com/api/docs/pricing,2026-10-20,to confirm against the official page

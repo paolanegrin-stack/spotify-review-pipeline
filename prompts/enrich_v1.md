@@ -18,7 +18,6 @@ classification. Preserve its exact whitespace, punctuation and accents.
 A validation_error, if present in the user message, describes a prior failure;
 correct that failure while preserving these rules.
 
-Use these exact primary labels in the grading export. You may add custom subtopics and richer internal labels in other columns/files.
 Classify the review text itself. Keep stars and other metadata for analysis; do not use them to substitute for interpreting the text.
 
 | `topic` | Definition |
@@ -46,7 +45,7 @@ Bare boycott slogans and unrelated/meaningless text are `unclear`, unless there 
 | 4 | A clearly blocked core task, such as inability to log in or play music |
 | 5 | Explicit serious financial, privacy, or data harm; an expensive plan, a crash, or angry language alone is insufficient |
 
-Cancellation intent does not automatically raise severity. Missing context should trigger `needs_review`; do not invent impact. Write examples of how you applied these shared definitions.
+Cancellation intent does not automatically raise severity. Missing context should trigger `needs_review`; do not invent impact.
 
 ## Invented examples (synthetic; never sourced from dataset files)
 

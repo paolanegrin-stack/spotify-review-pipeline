@@ -23,6 +23,10 @@ class BudgetStop(Exception):
     pass
 
 
+class FatalAPIError(Exception):
+    """Permanent request/schema rejection: stop dispatch without retrying."""
+
+
 def object_schema(properties):
     return dict(type='object', properties=properties, required=list(properties), additionalProperties=False)
 
@@ -170,7 +174,7 @@ class Ledger:
                      input_tokens=None, cached_input_tokens=None, output_tokens=None,
                      latency_seconds=None, timestamp=datetime.now(timezone.utc).isoformat(),
                      reserved_usd=str(cost), actual_cost_usd=None, request=request,
-                     pricing_basis='provisional course illustration; cached-input rate unverified',
+                     pricing_basis='user-supplied rates dated 2026-10-20; to confirm against the official page',
                      local_id_map={key: row['review_id'] for key, row in local.items()})
         with self.lock, connect(self.path) as db:
             db.execute('BEGIN IMMEDIATE')
@@ -221,18 +225,29 @@ def call_batch(batch, ledger, phase, client, validation_error=None):
     for attempt in range(C.MAX_API_ATTEMPTS):
         call_id, event, reserved = ledger.reserve(batch, request, local, phase)
         started = time.monotonic()
-        response, error, retry = None, None, False
+        response, error, retry, fatal = None, None, False, False
         try:
             response = client.responses.create(**request)
         except (APIConnectionError, APIStatusError) as exc:
-            # Do not serialize exception bodies: they can contain sensitive content.
-            error = type(exc).__name__
+            error = str(exc)
+            event['error_type'] = type(exc).__name__
+            event['error_body'] = getattr(exc, 'body', None)
+            event['provider_request_id'] = getattr(exc, 'request_id', None)
             code = getattr(exc, 'status_code', None)
+            event['http_status'] = code
+            # Stop on all permanent request-validation failures, including schema
+            # rejections even when the server's wording does not name a keyword.
+            fatal = code in (400, 422) or ('schema' in error.lower() and
+                      any(word in error.lower() for word in ('invalid', 'unsupported', 'not permitted', 'not supported')))
             retry = isinstance(exc, (APIConnectionError, RateLimitError)) or code in (408, 409) or (code is not None and code >= 500)
         except Exception as exc:
             error = type(exc).__name__
         if error:
+            if fatal:
+                ledger.stopped.set()
             ledger.finish(call_id, event, reserved, response, error, time.monotonic() - started)
+            if fatal:
+                raise FatalAPIError(error)
             if retry and attempt + 1 < C.MAX_API_ATTEMPTS:
                 time.sleep(min(C.MAX_BACKOFF_SECONDS, C.BACKOFF_SECONDS * 2 ** attempt) + random.random())
                 continue
@@ -287,10 +302,10 @@ def process_batch(batch, ledger, phase, client):
                     outcomes.append((row, fixed['r1'], None))
                 else:
                     outcomes.append((row, None, 'validation_failed:' + remaining['r1']))
-            except BudgetStop:
+            except (BudgetStop, FatalAPIError):
                 save_batch(ledger.path, outcomes)
                 raise
-    except BudgetStop:
+    except (BudgetStop, FatalAPIError):
         ledger.stopped.set()
         raise
     save_batch(ledger.path, outcomes)
@@ -348,7 +363,8 @@ def run(args):
         request, _ = build_request(batch)
         output = json.dumps(request, ensure_ascii=False, indent=2)
         print(output)
-        print('Estimated input tokens (conservative UTF-8 byte bound, not measured):', input_estimate(request))
+        print('Estimated input tokens — byte-based upper bound (UTF-8 bytes + overhead; not API usage):', input_estimate(request))
+        print('Real token counts come only from API response usage fields.')
         return
     if cap == 0:
         print('Budget stop: default/explicit spend cap is zero; no API client or call created.')
@@ -372,6 +388,7 @@ def run(args):
         from openai import OpenAI
         load_dotenv(ROOT / '.env')
         with OpenAI(max_retries=0, timeout=C.TIMEOUT_SECONDS) as client:
+            fatal_error = None
             # At most workers batches in flight; new submissions stop at budget boundary.
             batches = iter(rows[i:i + C.BATCH_SIZE] for i in range(0, len(rows), C.BATCH_SIZE))
             with ThreadPoolExecutor(max_workers=args.workers) as pool:
@@ -388,10 +405,16 @@ def run(args):
                     except BudgetStop as exc:
                         ledger.stopped.set()
                         print(str(exc))
+                    except FatalAPIError as exc:
+                        ledger.stopped.set()
+                        fatal_error = str(exc)
+                        print('Permanent API/schema error; stopping without retry: ' + fatal_error)
                     if not ledger.stopped.is_set():
                         batch = next(batches, None)
                         if batch:
                             active.add(pool.submit(process_batch, batch, ledger, args.phase, client))
+            if fatal_error is not None:
+                raise SystemExit(1)
     finally:
         lock_path.unlink(missing_ok=True)
 
