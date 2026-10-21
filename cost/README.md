@@ -1,42 +1,48 @@
-# Provisional rates
+# Offline cost calculator
 
-rates.csv records user-supplied rates of $0.10 input, $0.01 cached input and
-$0.50 output per million tokens, with the official pricing-page URL and
-checked_date 2026-10-20. The note is **to confirm against the official page**;
-the date and rates have not been independently verified online in this task.
-
-No pilot has been executed. Dry-run needs no credentials and makes no calls:
+Default offline replay after the cold and warm invocations:
 
 ```powershell
-.venv\Scripts\python -m src.enrich --run-id pilot_dry --dry-run
+.venv\Scripts\python -m cost.calculator --runs pilot_cold
 ```
 
-Live execution requires an explicit positive --max-spend-usd (default 0).
-Reservations use an intentionally conservative UTF-8 byte count plus overhead
-as a byte-based input-token upper bound, and the full configured output cap. This is
-an estimate, not a provider billing guarantee. Unknown charges keep their full
-reservation across restarts. If the cached-input rate is missing, any call
-reporting cached tokens also retains its full reservation and marks cost
-unknown. Real token counts come only from API response usage fields; the
-dry-run byte bound is never written as measured usage. No missing usage or
-cached rate is silently counted as zero.
-The ledger is shared by all workers and survives restart; budget totals cover
-all configurations in the run. SDK retries are disabled; explicit retries are
-individually reserved and logged. Reconcile uncertain charges before scaling.
+Separate run folders are also supported: `--runs pilot_cold pilot_warm`.
+Optional estimate settings: `--budget-usd 40 --workers 20`. Workers here are a
+modeled speedup, not a request to start workers or make API calls.
 
-Only one enrichment process may own a run at a time. A leftover .enrich.lock
-after a forced termination requires inspection before removal. SQLite call
-events are the durable log; calls.jsonl is an atomically regenerated view.
-Requests, schemas, responses and local-ID maps are saved in call events.
-The dry-run output is only a request preview, not measured usage or labels.
+Explicit paid pilot execution (run these yourself, after confirming rates):
 
-SDK integration was inspected locally in installed openai 3.35.1:
-resources/responses/responses.py accepts `reasoning` and `text`;
-types/shared_params/reasoning.py accepts `effort="none"`;
-types/responses/response_format_text_json_schema_config_param.py defines
-`type="json_schema"`, `name`, `schema`, and `strict=True` inside `text.format`.
-No online documentation or model-availability check was performed.
-The full request preview includes the exact system instructions, local-ID user
-message and schema. --limit counts distinct texts; aliases can complete more
-original review IDs. Results and direct cache provenance live in
-enrichment_results, joined to records for source identity and status.
+```powershell
+if (Test-Path -LiteralPath runs/pilot_cold) { throw 'Use a fresh pilot_cold directory for the cold pilot.' }
+.venv\Scripts\python -m src.pipeline --input data/cost_100.csv --run-id pilot_cold --workers 1 --verify-sample 20 --max-spend-usd 0.50 --execute
+if ($LASTEXITCODE -ne 0) { throw 'Cold pilot incomplete; inspect its logs before continuing.' }
+Copy-Item -LiteralPath runs/pilot_cold/run_summary.json -Destination runs/pilot_cold/run_summary_cold.json
+
+# Warm invocation: same run ID and settings, preserving every result cache.
+.venv\Scripts\python -m src.pipeline --input data/cost_100.csv --run-id pilot_cold --workers 1 --verify-sample 20 --max-spend-usd 0.50 --execute
+if ($LASTEXITCODE -ne 0) { throw 'Warm pilot incomplete; inspect its logs.' }
+Copy-Item -LiteralPath runs/pilot_cold/run_summary.json -Destination runs/pilot_cold/run_summary_warm.json
+```
+
+The calculator separates cold/warm invocations using run_log.jsonl invocation
+IDs and each call's timestamp. The second invocation must show zero new enrich
+calls; the report prints PASS or FAIL. Original initial/resume call phases are
+preserved; exports add pilot_phase=cold/warm and run_id. Summary snapshots retain
+each invocation's measured total time and counts. Without a matching snapshot,
+the calculator reports the logged stage span and current database counts.
+
+Outputs: report.md, usage.csv, pilot_records.jsonl (one final record per pilot
+ID), pilot_calls.jsonl. The supplied 100-review checksum is checked. Pending
+classifications prevent a final records export; finish the pilot first.
+
+API cost = ((input - cached_input) × input_rate + cached_input × cached_rate
++ output × output_rate) / 1,000,000. Reasoning is already included in output.
+Missing usage/rates remain UNKNOWN. Infrastructure/local-compute cost is UNKNOWN.
+Rates retain their source URLs/dates in usage.csv; the current values still
+carry the note "to confirm against the official page".
+
+Full-run estimates use each stage's measured work: enrichment scales to exact
+texts or all nonempty rows, verification to 2,000 reviews, grouping/memo once.
+Conservative estimates add 20% API retries. Enrich seconds per call are divided
+by the modeled workers. Time does not depend on token prices. No network, API
+key or package installation is needed for replay, and importing makes no calls.
