@@ -16,6 +16,7 @@ from . import config as C
 from . import prepare, enrich, verify, group, rank, memo
 from .prepare import ROOT, canonical, file_sha
 from .stage_common import atomic_text, completed_records, digest, csv_text
+from .file_io import append_jsonl
 
 STAGES = ('prepare','enrich','verify','group','rank','memo')
 MODELS = ('enrich','verify','group','memo')
@@ -214,8 +215,7 @@ def run(args):
             if error:
                 entry['error'] = error
             folder.mkdir(parents=True,exist_ok=True)
-            with (folder/'run_log.jsonl').open('a',encoding='utf-8',newline='\n') as log:
-                log.write(canonical(entry)+'\n')
+            append_jsonl(folder/'run_log.jsonl', entry)
             log_entries.append(entry)
             print(f'{stage}: {"reused" if reused else "recomputed"}; status={stage_status}; calls={entry["calls"]["total"]}')
             if stage_status in ('budget_stopped','failed','failed_checks','blocked_insufficient_evidence','interrupted'):

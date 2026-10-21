@@ -18,6 +18,7 @@ import uuid
 
 from . import config as C
 from .prepare import ROOT, canonical
+from .file_io import LOG_LOCK, append_jsonl
 
 
 class BudgetStop(Exception):
@@ -212,12 +213,18 @@ class Ledger:
         self.limiter = GLOBAL_LIMITER
 
     def export(self, db):
+        """Recover missing durable events at startup, without rewriting history."""
         target = self.path.parent / 'calls.jsonl'
-        temporary = target.with_suffix('.jsonl.tmp')
-        with temporary.open('w', encoding='utf-8', newline='\n') as stream:
+        with LOG_LOCK:
+            known = set()
+            if target.exists():
+                with target.open(encoding='utf-8') as stream:
+                    known = {json.loads(line)['request_id'] for line in stream if line.strip()}
             for row in db.execute('SELECT event_json FROM enrichment_calls ORDER BY rowid'):
-                stream.write(row[0] + '\n')
-        temporary.replace(target)
+                event = json.loads(row[0])
+                if event['request_id'] not in known:
+                    append_jsonl(target, event)
+                    known.add(event['request_id'])
 
     def reserve(self, batch, request, local, phase):
         tokens = input_estimate(request)
@@ -250,7 +257,8 @@ class Ledger:
                 db.execute('UPDATE records SET attempts=attempts+1 WHERE text_sha256=? AND review_text=?',
                            (row['text_sha256'], row['review_text']))
             db.commit()
-            self.export(db)
+            # Interrupted reservations remain durable in SQLite; startup exports
+            # them as failed with unknown usage if no final event was logged.
         return call_id, event, cost
 
     def finish(self, call_id, event, reserved, response, error, latency):
@@ -276,7 +284,7 @@ class Ledger:
             db.execute('UPDATE enrichment_calls SET liability_usd=?,event_json=? WHERE call_id=?',
                        (str(liability), canonical(event), call_id))
             db.commit()
-            self.export(db)
+            append_jsonl(self.path.parent / 'calls.jsonl', event)
         if liability > reserved:
             self.stopped.set()
             raise BudgetStop('Actual usage exceeded conservative reservation; stopped for reconciliation')

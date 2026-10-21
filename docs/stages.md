@@ -56,6 +56,9 @@ logged as failed and rejected. Missing usage stays visibly unknown.
 stage_cache stores each validated batch atomically in SQLite, keyed by the exact
 request (including model, effort, schema, prompt and inputs) and source hashes.
 On restart those results are re-exported without new calls. JSON/CSV/Markdown
-exports use temporary files and atomic replacement; SQLite is authoritative.
-All live roles share .enrich.lock to prevent simultaneous log-export processes.
+exports use main-thread atomic replacement with bounded PermissionError retries;
+SQLite is authoritative. Call and run logs use append/flush/close under one
+process-wide lock. In-flight attempts persist in SQLite; restart appends any
+missing events as failed with unknown usage, without rewriting existing lines.
+All live roles share .enrich.lock to prevent simultaneous runs on one database.
 Dry-runs read the database without migrations or writes and print final summaries.

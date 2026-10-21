@@ -12,6 +12,7 @@ import time
 
 from . import config as C
 from .prepare import ROOT, canonical
+from .file_io import atomic_text
 from .enrich import (BudgetStop, FatalAPIError, Ledger, connect, initialize,
                      input_estimate, read_rates, snapshot, print_summary, progress)
 
@@ -42,14 +43,6 @@ def completed_records(path):
         if len({r['review_id'] for r in output}) != len(output):
             raise ValueError('Duplicate completed review IDs')
         return output
-
-
-def atomic_text(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + '.tmp')
-    with tmp.open('w', encoding='utf-8', newline='\n') as stream:
-        stream.write(text)
-    tmp.replace(path)
 
 
 def csv_text(fields, rows):

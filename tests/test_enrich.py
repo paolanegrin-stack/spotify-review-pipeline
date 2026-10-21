@@ -142,6 +142,20 @@ class StateTests(unittest.TestCase):
         with connect(self.path) as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM enrichment_calls').fetchone()[0], 1)
 
+    def test_interrupted_call_recovered_once_with_unknown_usage(self):
+        request, local = build_request([self.original])
+        self.ledger.reserve([self.original], request, local, 'initial')
+        with connect(self.path) as db:
+            self.ledger.export(db)
+            self.ledger.export(db)
+        lines = (self.path.parent / 'calls.jsonl').read_text(encoding='utf-8').splitlines()
+        self.assertEqual(len(lines), 1)
+        event = json.loads(lines[0])
+        self.assertEqual(event['outcome'], 'failed')
+        self.assertEqual(event['error'], 'in_flight_or_interrupted_usage_unknown')
+        for field in ('input_tokens', 'cached_input_tokens', 'output_tokens'):
+            self.assertIsNone(event[field])
+
     def test_temporary_errors_bounded_and_logged(self):
         from openai import APIConnectionError
         import httpx2
