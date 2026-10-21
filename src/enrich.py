@@ -8,8 +8,10 @@ import csv
 from datetime import datetime, timezone
 from decimal import Decimal
 import json
+import os
 from pathlib import Path
 import random
+import signal
 import sqlite3
 import sys
 import threading
@@ -19,6 +21,7 @@ import uuid
 from . import config as C
 from .prepare import ROOT, canonical
 from .file_io import LOG_LOCK, append_jsonl
+from .scope import clause as scope_clause, install as install_scope, snapshot as scope_snapshot
 
 
 class BudgetStop(Exception):
@@ -254,7 +257,7 @@ class Ledger:
                 raise BudgetStop(f'Budget stop: spent/reserved {spent} + next {cost} > cap {self.cap}')
             db.execute('INSERT INTO enrichment_calls VALUES (?,?,?)', (call_id, str(cost), canonical(event)))
             for row in batch if self.role == 'enrich' else []:
-                db.execute('UPDATE records SET attempts=attempts+1 WHERE text_sha256=? AND review_text=?',
+                db.execute('UPDATE records AS r SET attempts=attempts+1 WHERE text_sha256=? AND review_text=? AND ' + scope_clause(db),
                            (row['text_sha256'], row['review_text']))
             db.commit()
             # Interrupted reservations remain durable in SQLite; startup exports
@@ -343,7 +346,7 @@ def save_batch(path, outcomes):
     """All results/status changes for this batch commit together, including aliases."""
     with connect(path) as db:
         for original, result, reason in outcomes:
-            matches = db.execute('SELECT * FROM records WHERE text_sha256=? AND review_text=?',
+            matches = db.execute('SELECT * FROM records r WHERE text_sha256=? AND review_text=? AND ' + scope_clause(db),
                                  (original['text_sha256'], original['review_text'])).fetchall()
             for row in matches:
                 if result is not None:
@@ -384,11 +387,11 @@ def process_batch(batch, ledger, phase, client):
 
 def pending(db, limit):
     # Configuration-specific saved results are reusable only for exact text.
-    query = '''SELECT r.* FROM records r
-        WHERE r.status != 'quarantined' AND NOT EXISTS (
+    query = f'''SELECT r.* FROM records r
+        WHERE {scope_clause(db)} AND r.status != 'quarantined' AND NOT EXISTS (
             SELECT 1 FROM enrichment_results e WHERE e.review_id=r.review_id AND e.label_config=?)
         AND r.source_row=(SELECT MIN(x.source_row) FROM records x
-                         WHERE x.text_sha256=r.text_sha256 AND x.review_text=r.review_text)
+                         WHERE x.text_sha256=r.text_sha256 AND x.review_text=r.review_text AND {scope_clause(db, 'x')})
         ORDER BY r.source_row'''
     rows = [dict(row) for row in db.execute(query, (C.LABEL_CONFIG,))]
     return rows if limit is None else rows[:limit]
@@ -397,9 +400,9 @@ def pending(db, limit):
 def reuse_saved(path):
     """Reconcile pending aliases using direct originals, including after restart."""
     with connect(path) as db:
-        rows = db.execute('''SELECT DISTINCT e.result_json, r.* FROM enrichment_results e
+        rows = db.execute(f'''SELECT DISTINCT e.result_json, r.* FROM enrichment_results e
             JOIN records r ON r.review_id=e.review_id
-            WHERE e.label_config=? AND e.cache_source_id IS NULL AND EXISTS (
+            WHERE {scope_clause(db)} AND e.label_config=? AND e.cache_source_id IS NULL AND EXISTS (
                 SELECT 1 FROM records p WHERE p.text_sha256=r.text_sha256
                 AND p.review_text=r.review_text AND p.status='pending')''', (C.LABEL_CONFIG,)).fetchall()
     for row in rows:
@@ -481,9 +484,34 @@ def run(args):
                 and ':' not in args.run_id and '\\' not in args.run_id):
             path = ROOT / 'runs' / args.run_id / 'pipeline.db'
             before = snapshot(path)
-        return execute_run(args)
+        with safe_interrupt() as interrupted:
+            args.interrupted = interrupted
+            try:
+                return execute_run(args)
+            finally:
+                if interrupted.is_set() and path is not None and path.is_file() and not args.dry_run:
+                    completed, remaining = scope_snapshot(path, 'checkpoint_before.json')
+                    print(f'Interrupted safely: {completed} completed, {remaining} pending in scope')
+                    raise SystemExit(130)
     finally:
         print_summary(args, path, before, started)
+
+
+@contextmanager
+def safe_interrupt():
+    """First Ctrl+C drains dispatched batches; second forces process exit."""
+    interrupted = threading.Event()
+    previous = signal.getsignal(signal.SIGINT)
+    def handle(signum, frame):
+        if interrupted.is_set():
+            os._exit(130)
+        interrupted.set()
+        print('Interrupt requested: stopping dispatch; waiting for in-flight calls. Ctrl+C again forces exit.', flush=True)
+    signal.signal(signal.SIGINT, handle)
+    try:
+        yield interrupted
+    finally:
+        signal.signal(signal.SIGINT, previous)
 
 
 def execute_run(args):
@@ -499,6 +527,9 @@ def execute_run(args):
     path = ROOT / 'runs' / args.run_id / 'pipeline.db'
     if not path.is_file():
         raise ValueError('Run database missing; run prepare first')
+    scope_file = getattr(args, 'scope_file', None)
+    if scope_file and not args.dry_run:
+        install_scope(path, scope_file)
     # Read-only dry-run: no migrations, credentials, logs, or state changes.
     if args.dry_run:
         with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)) as db:
@@ -507,7 +538,7 @@ def execute_run(args):
             if has_results:
                 batch = pending(db, min(args.limit or C.BATCH_SIZE, C.BATCH_SIZE))
             else:
-                batch = [dict(r) for r in db.execute("SELECT * FROM records WHERE status='pending' GROUP BY text_sha256 ORDER BY MIN(source_row) LIMIT ?", (min(args.limit or C.BATCH_SIZE, C.BATCH_SIZE),))]
+                batch = [dict(r) for r in db.execute("SELECT * FROM records r WHERE status='pending' AND " + scope_clause(db) + " GROUP BY text_sha256 ORDER BY MIN(source_row) LIMIT ?", (min(args.limit or C.BATCH_SIZE, C.BATCH_SIZE),))]
         if not batch:
             print('No pending texts.')
             return
@@ -527,6 +558,8 @@ def execute_run(args):
     try:
         with connect(path) as db:
             initialize(db)
+            args.phase = 'resume' if (db.execute('SELECT 1 FROM enrichment_calls LIMIT 1').fetchone()
+                                      or (path.parent/'checkpoint_before.json').exists()) else 'initial'
         reuse_saved(path)
         with connect(path) as db:
             rows = pending(db, args.limit)
@@ -535,10 +568,13 @@ def execute_run(args):
             ledger.export(db)
         if not rows:
             print('No pending texts under ' + C.LABEL_CONFIG)
+            if scope_file or (path.parent/'scope_ids.txt').exists():
+                scope_snapshot(path, 'checkpoint_after.json')
             return
         from dotenv import load_dotenv
         from openai import OpenAI
         load_dotenv(ROOT / '.env')
+        interrupted = args.interrupted
         with progress(path), OpenAI(max_retries=0, timeout=C.TIMEOUT_SECONDS) as client:
             fatal_error = None
             # At most workers batches in flight; new submissions stop at budget boundary.
@@ -546,6 +582,8 @@ def execute_run(args):
             with ThreadPoolExecutor(max_workers=args.workers) as pool:
                 active = set()
                 for _ in range(args.workers):
+                    if interrupted.is_set() or ledger.stopped.is_set():
+                        break
                     batch = next(batches, None)
                     if batch:
                         active.add(pool.submit(process_batch, batch, ledger, args.phase, client))
@@ -562,12 +600,19 @@ def execute_run(args):
                         ledger.stopped.set()
                         fatal_error = str(exc)
                         print('Permanent API/schema error; stopping without retry: ' + fatal_error)
-                    if not ledger.stopped.is_set():
+                    if not interrupted.is_set() and not ledger.stopped.is_set():
                         batch = next(batches, None)
                         if batch:
                             active.add(pool.submit(process_batch, batch, ledger, args.phase, client))
+            if interrupted.is_set():
+                return
             if fatal_error is not None:
                 raise SystemExit(1)
+            if scope_file or (path.parent/'scope_ids.txt').exists():
+                with connect(path) as db:
+                    remaining = db.execute("SELECT COUNT(*) FROM records r WHERE status='pending' AND " + scope_clause(db)).fetchone()[0]
+                if not remaining:
+                    scope_snapshot(path, 'checkpoint_after.json')
     finally:
         lock_path.unlink(missing_ok=True)
 
@@ -582,6 +627,7 @@ def main():
     parser.add_argument('--workers', type=int, default=C.WORKERS)
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--phase', choices=('initial', 'resume'), default='initial')
+    parser.add_argument('--scope-file', type=Path)
     run(parser.parse_args())
 
 

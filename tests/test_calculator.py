@@ -2,10 +2,15 @@ from copy import deepcopy
 from decimal import Decimal
 import unittest
 
-from cost.calculator import bill, measure, estimates
+from cost.calculator import bill, measure, estimates, scope_seconds
 
 
 class CalculatorTests(unittest.TestCase):
+    def test_throughput_uses_elapsed_time_and_scales_workers_once(self):
+        measured = [{'enrich': dict(completed=10000,seconds=300,workers=300)}]
+        self.assertEqual(scope_seconds(measured,100000,300), Decimal(3000))
+        self.assertEqual(scope_seconds(measured,100000,150), Decimal(6000))
+
     def test_unknown_usage_preserves_known_subtotal_and_prices_projected_attempts(self):
         rates = {('openai','gpt-6-luna',item):dict(price_usd_per_million_tokens=price)
                  for item,price in (('input','.10'),('cached_input','.01'),('output','.50'))}

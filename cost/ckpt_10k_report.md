@@ -48,7 +48,7 @@ Warm zero-new-enrichment check: FAIL
 ## Full-run estimates
 
 660,622 rows; 660,609 nonempty; 13 quarantined; 484,189 distinct nonempty texts.
-Budget USD: 40; modeled enrich workers: 20. Verification work: 2000; group and memo costs/time occur once.
+Budget USD: 40; modeled enrich workers: 300. Verification work: 2000; group and memo costs/time occur once.
 Enrich/verify scale by their own successful work counts. Projected attempts use known per-call average cost, including retries; unknown charges are estimated, not claimed as measured.
 Prepare/rank time scales by rows. Conservative case adds 20% API retries. Local-compute price remains UNKNOWN.
 Worker speedup is modeled, not measured, and assumes no rate-limit or resource contention.
@@ -60,4 +60,7 @@ Worker speedup is modeled, not measured, and assumes no rate-limit or resource c
 | without reuse | base | UNKNOWN | UNKNOWN | UNKNOWN |
 | without reuse | conservative | UNKNOWN | UNKNOWN | UNKNOWN |
 
-Enrich seconds/call: 1.9651006; modeled seconds/call at 20 workers: 0.09825503; modeled distinct-text throughput/second: 500.3984698459373191038328182.
+Enrich elapsed stage seconds/call (not summed call latency): 1.9651006.
+
+100,000-review enrichment at 300 workers: base seconds 3676.594805653710247349823322; conservative (+20%) seconds 4411.913766784452296819787986.
+Based on completed records / measured enrich-stage wall time in the latest completed enrichment invocation with matching saved worker settings; worker scaling applied once. Legacy logs lack completion deltas: completed counts include exact-text aliases inferred from successful calls. This is enrichment time only, excluding downstream stages; linear scaling assumes no additional contention.

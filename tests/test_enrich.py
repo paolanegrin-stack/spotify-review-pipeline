@@ -1,4 +1,5 @@
 import json
+import signal
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -313,6 +314,50 @@ class StateTests(unittest.TestCase):
             factory.assert_not_called()
         self.assertIn('Final summary', self.printed(output))
         self.assertIn('Wall-clock seconds', self.printed(output))
+
+    def test_safe_interrupt_drains_and_resume_skips_completed_ids(self):
+        root, args = self.summary_fixture()
+        path = root/'runs/summary_test/pipeline.db'
+        third = source('A different invented review.', 'original-3')
+        with connect(path) as db:
+            db.execute('INSERT INTO records VALUES (?,?,?,?,?,?,?)',
+                       (3, third['review_id'], third['review_text'], third['text_sha256'], 'pending', 0, None))
+        scope = path.parent/'scope_ids.txt'
+        scope.write_text('original-1\noriginal-2\noriginal-3\n', encoding='utf-8')
+        args.scope_file, args.limit = scope, None
+        def interrupted_response(**kwargs):
+            signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
+            return self.response(dict(records=[result()]))
+        client = SimpleNamespace(responses=SimpleNamespace(create=interrupted_response))
+        with patch('src.enrich.ROOT', root), patch('src.enrich.read_rates', return_value=self.ledger.rates), \
+                patch('src.enrich.C.BATCH_SIZE', 1), patch('openai.OpenAI') as factory, patch('builtins.print') as output:
+            factory.return_value.__enter__.return_value = client
+            with self.assertRaises(SystemExit) as stopped:
+                run(args)
+            self.assertEqual(stopped.exception.code, 130)
+            self.assertIn('Interrupted safely: 2 completed, 1 pending in scope', self.printed(output))
+            before_bytes = (path.parent/'checkpoint_before.json').read_bytes()
+            before = json.loads(before_bytes)
+            self.assertEqual(before['completed_ids'], ['original-1', 'original-2'])
+            client.responses.create = lambda **kw: self.response(dict(records=[result()]))
+            run(args)
+        self.assertEqual(args.phase, 'resume')
+        after = json.loads((path.parent/'checkpoint_after.json').read_text(encoding='utf-8'))
+        self.assertEqual(after['count'], 3)
+        self.assertEqual((path.parent/'checkpoint_before.json').read_bytes(), before_bytes)
+        calls = [json.loads(line) for line in (path.parent/'calls.jsonl').read_text(encoding='utf-8').splitlines()]
+        self.assertEqual([e['phase'] for e in calls], ['initial', 'resume'])
+        self.assertEqual([e['review_ids'] for e in calls], [['original-1'], ['original-3']])
+
+    def test_second_interrupt_forces_exit(self):
+        from src.enrich import safe_interrupt
+        with patch('src.enrich.os._exit') as exit, patch('builtins.print'):
+            with safe_interrupt() as stopped:
+                handler = signal.getsignal(signal.SIGINT)
+                handler(signal.SIGINT, None)
+                self.assertTrue(stopped.is_set())
+                handler(signal.SIGINT, None)
+            exit.assert_called_once_with(130)
 
 
 if __name__ == '__main__':

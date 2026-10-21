@@ -93,6 +93,8 @@ def fingerprint(stage, args, folder, input_sha):
     value = dict(stage=stage,input_sha256=input_sha,execute=args.execute,
                  config={key:getattr(C,key) for key in dir(C) if key.isupper()},
                  code={name:file_sha(ROOT/'src'/f'{name}.py') for name in (stage,'config','stage_common')})
+    scope = getattr(args, 'scope_file', None)
+    value['scope_sha256'] = file_sha(scope) if scope else None
     if stage != 'prepare':
         value['records'] = records_digest(folder/'pipeline.db')
     if stage in MODELS:
@@ -128,7 +130,7 @@ def prepare_or_reuse(args, folder, input_sha):
 def invoke(stage,args,folder,phase):
     common = dict(run_id=args.run_id,phase=phase,dry_run=not args.execute,max_spend_usd=args.max_spend_usd)
     if stage == 'enrich':
-        stage_args = argparse.Namespace(**common,limit=None,workers=args.workers)
+        stage_args = argparse.Namespace(**common,limit=None,workers=args.workers,scope_file=getattr(args,'scope_file',None))
         enrich.run(stage_args)
     elif stage == 'verify':
         stage_args = argparse.Namespace(**common,sample_size=args.verify_sample,planted_error_test=False)
@@ -182,6 +184,7 @@ def run(args):
         for stage in STAGES:
             start, clock = now(), time.monotonic()
             prior_calls = events(path)
+            completed_before = (enrich.snapshot(path)['statuses'] or {}).get('completed', 0)
             last = prior_calls[-1]['rowid'] if prior_calls else 0
             reused, stage_status, error = False, 'completed', None
             try:
@@ -207,10 +210,12 @@ def run(args):
                 state[stage] = dict(fingerprint=key,status=stage_status,outputs=outputs(stage,folder,not args.execute))
                 atomic_text(state_path,json.dumps(state,indent=2,sort_keys=True)+'\n')
             except (Exception,SystemExit,KeyboardInterrupt) as exc:
-                stage_status = 'interrupted' if isinstance(exc,KeyboardInterrupt) else 'failed'
+                stage_status = 'interrupted' if isinstance(exc,KeyboardInterrupt) or (isinstance(exc,SystemExit) and exc.code == 130) else 'failed'
                 error = str(exc) or type(exc).__name__
             entry = dict(invocation_id=invocation,stage=stage,start=start,end=now(),
                          wall_clock_seconds=round(time.monotonic()-clock,6),status=stage_status,reused=reused,
+                         records_completed=max(0, (enrich.snapshot(path)['statuses'] or {}).get('completed',0)-completed_before),
+                         workers=args.workers if stage=='enrich' else 1,
                          **telemetry(events(path,last)))
             if error:
                 entry['error'] = error
@@ -257,9 +262,10 @@ def main():
     parser.add_argument('--max-spend-usd',default=C.DEFAULT_MAX_SPEND_USD)
     parser.add_argument('--workers',type=int,default=C.WORKERS)
     parser.add_argument('--execute',action='store_true')
+    parser.add_argument('--scope-file',type=Path)
     result = run(parser.parse_args())
     if result['status'] not in ('completed','dry_run_complete'):
-        raise SystemExit(1)
+        raise SystemExit(130 if result['status']=='interrupted' else 1)
 
 
 if __name__ == '__main__':

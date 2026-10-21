@@ -70,8 +70,14 @@ def measure(calls, stages, rates, source, summary):
         else:
             work = int(any(c['outcome']=='succeeded' for c in attempted))
         config = summary.get('config',{})
+        completed = sum(s['records_completed'] for s in stages if s['stage']=='enrich' and 'records_completed' in s)
+        if role == 'enrich' and not any('records_completed' in s for s in stages if s['stage']=='enrich'):
+            # Legacy logs: infer completed aliases from exact-text matches to successful calls.
+            texts = {r['text_sha256'] for r in source if r['review_id'] in ids and r['status']=='completed'}
+            completed = sum(r['status']=='completed' and r['text_sha256'] in texts for r in source)
         prefix = '' if role=='enrich' else role.upper()+'_'
         result[role] = dict(calls=len(attempted),succeeded=sum(c['outcome']=='succeeded' for c in attempted),
+                            completed=completed if role=='enrich' else 0,
                             failed=sum(c['outcome']=='failed' for c in attempted),work=work,
                             cost=sum((r['cost_usd'] for r in charges if r['cost_usd'] is not None),Decimal(0)),
                             known_calls=len(known_calls),unknown_usage=len(unknown_ids),unknown_request_ids=unknown_ids,
@@ -81,7 +87,8 @@ def measure(calls, stages, rates, source, summary):
                             model=summary.get('model_ids',{}).get(role,config.get(prefix+'MODEL')),
                             effort=config.get(prefix+'EFFORT'),prompt=summary.get('prompt_versions',{}).get(role),
                             batch=max((len(c['review_ids']) for c in attempted),default=config.get(prefix+'BATCH_SIZE','one aggregate pack')),
-                            workers=summary.get('workers',1) if role=='enrich' else 1)
+                            workers=next((s['workers'] for s in stages if s['stage']=='enrich' and 'workers' in s),
+                                         summary.get('workers',1)) if role=='enrich' else 1)
     for stage in ('prepare','rank'):
         result[stage] = dict(seconds=sum(s['wall_clock_seconds'] for s in stages if s['stage']==stage))
     return result
@@ -98,7 +105,7 @@ def estimates(measured, rows, workers, reuse=True, multiplier=Decimal('1')):
         costs.append(priced_attempt_cost*factor*multiplier if factor is not None and priced_attempt_cost is not None else None)
         seconds = Decimal(str(m['seconds']))*factor*multiplier if factor is not None else None
         if seconds is not None and role=='enrich':
-            seconds /= workers
+            seconds *= Decimal(m['workers']) / workers
         times.append(seconds)
     local = sum((Decimal(str(measured[stage]['seconds']))*Decimal(target_rows)/rows
                  for stage,target_rows in (('prepare',660622),('rank',660609))),Decimal(0))
@@ -110,6 +117,14 @@ def display(value):
     return 'UNKNOWN' if value is None else str(value)
 
 
+def scope_seconds(measured, count, workers):
+    """Elapsed stage time already includes concurrency; scale workers only once."""
+    completed = sum(m['enrich']['completed'] for m in measured)
+    adjusted = sum((Decimal(str(m['enrich']['seconds'])) * Decimal(m['enrich']['workers']) / workers
+                    for m in measured), Decimal(0))
+    return adjusted * count / completed if completed else None
+
+
 def run(run_ids, budget, workers):
     rates = load_rates(ROOT/'cost'/'rates.csv')
     report = ['# Pilot cost and runtime replay','',
@@ -117,6 +132,7 @@ def run(run_ids, budget, workers):
               'Reasoning tokens are reported but never billed again on top of output. Token/cost totals are known subtotals; calls without usage are listed separately.',
               'Rates and their source dates are preserved in usage.csv; current prices still require confirmation.','']
     usage, exported_calls, measured_runs, pilot = [],[],[],None
+    timing_runs = []
     seen_calls = set()
     for run_id in run_ids:
         if not run_id or run_id in ('.','..') or any(c in run_id for c in '/\\:'):
@@ -151,6 +167,9 @@ def run(run_ids, budget, workers):
             calls = [c for c in all_calls if start <= c['timestamp'] <= end]
             measurements = measure(calls,stages,rates,source,summary)
             measured_runs.append(measurements)
+            if matching and measurements['enrich']['completed'] and any(
+                    s['stage']=='enrich' and s['status']=='completed' for s in stages):
+                timing_runs.append(measurements)
             for call in calls:
                 key = (run_id,call['request_id'])
                 if key in seen_calls:
@@ -203,8 +222,14 @@ def run(run_ids, budget, workers):
     enrich = cold['enrich']
     if enrich['calls'] and enrich['seconds']:
         seconds_per_call = Decimal(str(enrich['seconds']))/enrich['calls']
-        report += ['',f'Enrich seconds/call: {seconds_per_call}; modeled seconds/call at {workers} workers: {seconds_per_call/workers}; '+
-                   f'modeled distinct-text throughput/second: {Decimal(enrich["work"])/enrich["calls"]*workers/seconds_per_call}.']
+        report += ['',f'Enrich elapsed stage seconds/call (not summed call latency): {seconds_per_call}.']
+    estimate_100k = scope_seconds(timing_runs[-1:], 100000, workers)
+    report += ['',f'100,000-review enrichment at {workers} workers: base seconds {display(estimate_100k)}; '
+               f'conservative (+20%) seconds {display(None if estimate_100k is None else estimate_100k*Decimal("1.2"))}.',
+               'Based on completed records / measured enrich-stage wall time in the latest completed enrichment invocation '
+               'with matching saved worker settings; worker scaling applied once. '
+               'Legacy logs lack completion deltas: completed counts include exact-text aliases inferred from successful calls. '
+               'This is enrichment time only, excluding downstream stages; linear scaling assumes no additional contention.']
     output = ROOT/'cost'
     prefix = '' if len(pilot)==100 else run_ids[0]+'_'
     (output/(prefix+'report.md')).write_text('\n'.join(report)+'\n',encoding='utf-8')

@@ -13,6 +13,7 @@ import time
 from . import config as C
 from .prepare import ROOT, canonical
 from .file_io import atomic_text
+from .scope import clause as scope_clause
 from .enrich import (BudgetStop, FatalAPIError, Ledger, connect, initialize,
                      input_estimate, read_rates, snapshot, print_summary, progress)
 
@@ -32,8 +33,8 @@ def completed_records(path):
         exists = db.execute("SELECT 1 FROM sqlite_master WHERE name='enrichment_results'").fetchone()
         if not exists:
             return []
-        rows = db.execute('''SELECT r.*,e.result_json FROM records r JOIN enrichment_results e
-            ON r.review_id=e.review_id WHERE r.status='completed' AND e.label_config=?
+        rows = db.execute(f'''SELECT r.*,e.result_json FROM records r JOIN enrichment_results e
+            ON r.review_id=e.review_id WHERE {scope_clause(db)} AND r.status='completed' AND e.label_config=?
             ORDER BY r.review_id''', (C.LABEL_CONFIG,))
         output = []
         for row in rows:
