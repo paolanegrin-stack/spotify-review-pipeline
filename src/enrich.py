@@ -335,7 +335,87 @@ def reuse_saved(path):
         save_batch(path, [(dict(row), json.loads(row['result_json']), None)])
 
 
+def snapshot(path):
+    """Read-only baseline for per-invocation accounting; never creates a database."""
+    state = dict(statuses=None, last_call=0, configured_results=0, events=[])
+    if path is None or not path.is_file():
+        return state
+    with closing(sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True)) as db:
+        state['statuses'] = {status: count for status, count in db.execute(
+            'SELECT status,COUNT(*) FROM records GROUP BY status')}
+        tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if 'enrichment_results' in tables:
+            state['configured_results'] = db.execute(
+                'SELECT COUNT(*) FROM enrichment_results WHERE label_config=?', (C.LABEL_CONFIG,)).fetchone()[0]
+        if 'enrichment_calls' in tables:
+            state['last_call'] = db.execute('SELECT COALESCE(MAX(rowid),0) FROM enrichment_calls').fetchone()[0]
+    return state
+
+
+def print_summary(args, path, before, started):
+    print(f'Final summary | run id: {args.run_id} | phase: {args.phase} | dry_run: {args.dry_run}')
+    try:
+        after = snapshot(path)
+        events = []
+        if path is not None and path.is_file() and after['last_call']:
+            with closing(sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True)) as db:
+                events = [json.loads(row[0]) for row in db.execute(
+                    'SELECT event_json FROM enrichment_calls WHERE rowid>? ORDER BY rowid', (before['last_call'],))]
+        attempted = len({rid for event in events for rid in event.get('review_ids', [])})
+        statuses = after['statuses']
+        if statuses is None:
+            print('Records: unavailable (run database does not exist).')
+        else:
+            previous = before['statuses'] or {}
+            completed = max(0, after['configured_results'] - before['configured_results'],
+                            statuses.get('completed', 0) - previous.get('completed', 0))
+            quarantined = max(0, statuses.get('quarantined', 0) - previous.get('quarantined', 0))
+            print(f'Records this invocation: attempted={attempted} (unique IDs sent); '
+                  f'completed={completed} (including exact-text reuse); quarantined={quarantined}; '
+                  f'still pending={statuses.get("pending", 0)} (whole database).')
+            print('Database totals: ' + '; '.join(f'{key}={statuses.get(key, 0)}'
+                  for key in ('pending', 'completed', 'quarantined')))
+        print(f'Calls this invocation: {len(events)} '
+              f'(succeeded={sum(e.get("outcome") == "succeeded" for e in events)}, '
+              f'failed={sum(e.get("outcome") == "failed" for e in events)}).')
+        for field in ('input_tokens', 'cached_input_tokens', 'output_tokens'):
+            known = [e[field] for e in events if type(e.get(field)) is int and e[field] >= 0]
+            missing = len(events) - len(known)
+            suffix = f'; unavailable for {missing} call(s), known subtotal only' if missing else ''
+            print(f'Real API {field}: {sum(known)}{suffix}')
+        known_cost, unresolved = Decimal(0), 0
+        rates = read_rates() if events else None
+        for event in events:
+            inp, cached, out = (event.get(k) for k in ('input_tokens', 'cached_input_tokens', 'output_tokens'))
+            if (event.get('model') != C.MODEL or any(type(v) is not int or v < 0 for v in (inp, cached, out))
+                    or cached > inp or (cached and rates.get('cached_input') is None)):
+                unresolved += 1
+                continue
+            known_cost += ((inp - cached) * rates['input'] + cached * (rates.get('cached_input') or Decimal(0))
+                           + out * rates['output']) / Decimal(1000000)
+        suffix = f'; TOTAL UNKNOWN: usage/rates unavailable for {unresolved} call(s)' if unresolved else ''
+        print(f'Estimated cost USD this invocation (cost/rates.csv): ${known_cost:.8f}{suffix}')
+    except (sqlite3.Error, OSError, ValueError, KeyError, TypeError) as exc:
+        print('Summary details unavailable: ' + str(exc))
+    finally:
+        print(f'Wall-clock seconds this invocation: {time.monotonic() - started:.3f}')
+
+
 def run(args):
+    started = time.monotonic()
+    path = None
+    before = dict(statuses=None, last_call=0, configured_results=0, events=[])
+    try:
+        if (args.run_id and Path(args.run_id).name == args.run_id and args.run_id not in ('.', '..')
+                and ':' not in args.run_id and '\\' not in args.run_id):
+            path = ROOT / 'runs' / args.run_id / 'pipeline.db'
+            before = snapshot(path)
+        return execute_run(args)
+    finally:
+        print_summary(args, path, before, started)
+
+
+def execute_run(args):
     if not args.run_id or Path(args.run_id).name != args.run_id or args.run_id in ('.', '..') or ':' in args.run_id or '\\' in args.run_id:
         raise ValueError('Invalid run ID')
     if not 1 <= C.BATCH_SIZE <= min(C.MAX_BATCH_SIZE, 50) or not 1 <= args.workers <= C.MAX_WORKERS:

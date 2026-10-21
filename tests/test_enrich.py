@@ -219,6 +219,87 @@ class StateTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(target.read_bytes()).hexdigest(), before)
         self.assertFalse((run_dir / 'calls.jsonl').exists())
 
+    def summary_fixture(self, cap='1'):
+        root = self.path.parent
+        run_dir = root / 'runs' / 'summary_test'
+        run_dir.mkdir(parents=True)
+        (run_dir / 'pipeline.db').write_bytes(self.path.read_bytes())
+        (root / 'prompts').mkdir(exist_ok=True)
+        (root / 'prompts' / 'enrich_v1.md').write_text('Synthetic test prompt', encoding='utf-8')
+        args = Namespace(run_id='summary_test', limit=1, workers=1, dry_run=False,
+                         max_spend_usd=cap, phase='initial')
+        return root, args
+
+    def printed(self, output):
+        return '\n'.join(str(c.args[0]) for c in output.call_args_list)
+
+    def test_success_summary_uses_real_usage_and_cached_rate(self):
+        root, args = self.summary_fixture()
+        response = self.response(dict(records=[result()]))
+        response.usage.input_tokens_details.cached_tokens = 50
+        client = SimpleNamespace(responses=SimpleNamespace(create=lambda **kw: response))
+        rates = dict(input=Decimal('.1'), output=Decimal('.5'), cached_input=Decimal('.01'))
+        with patch('src.enrich.ROOT', root), patch('src.enrich.read_rates', return_value=rates), patch('openai.OpenAI') as factory, patch('builtins.print') as output:
+            factory.return_value.__enter__.return_value = client
+            run(args)
+        text = self.printed(output)
+        self.assertIn('run id: summary_test | phase: initial', text)
+        self.assertIn('attempted=1 (unique IDs sent); completed=2', text)
+        self.assertIn('quarantined=0; still pending=0', text)
+        self.assertIn('succeeded=1, failed=0', text)
+        self.assertIn('Real API input_tokens: 100', text)
+        self.assertIn('Real API cached_input_tokens: 50', text)
+        self.assertIn('Real API output_tokens: 50', text)
+        self.assertIn('$0.00003050', text)
+        self.assertIn('Wall-clock seconds', text)
+
+    def test_no_pending_summary_excludes_historical_calls(self):
+        client = SimpleNamespace(responses=SimpleNamespace(create=lambda **kw: self.response(dict(records=[result()]))))
+        process_batch([self.original], self.ledger, 'initial', client)
+        root, args = self.summary_fixture()
+        with patch('src.enrich.ROOT', root), patch('src.enrich.read_rates', return_value=self.ledger.rates), patch('openai.OpenAI') as factory, patch('builtins.print') as output:
+            run(args)
+            factory.assert_not_called()
+        text = self.printed(output)
+        self.assertIn('No pending texts under', text)
+        self.assertIn('attempted=0 (unique IDs sent); completed=0', text)
+        self.assertIn('Calls this invocation: 0', text)
+        self.assertIn('completed=2', text)
+        self.assertIn('$0.00000000', text)
+
+    def test_budget_stop_prints_summary_without_call(self):
+        root, args = self.summary_fixture(cap='0.00000001')
+        client = SimpleNamespace(responses=SimpleNamespace(create=lambda **kw: None))
+        with patch('src.enrich.ROOT', root), patch('src.enrich.read_rates', return_value=self.ledger.rates), patch('openai.OpenAI') as factory, patch.object(client.responses, 'create') as create, patch('builtins.print') as output:
+            factory.return_value.__enter__.return_value = client
+            run(args)
+            create.assert_not_called()
+        text = self.printed(output)
+        self.assertIn('Budget stop:', text)
+        self.assertIn('Calls this invocation: 0', text)
+        self.assertIn('still pending=2', text)
+
+    def test_missing_usage_is_unknown_in_summary(self):
+        root, args = self.summary_fixture()
+        response = self.response(dict(records=[result()]))
+        response.usage = None
+        client = SimpleNamespace(responses=SimpleNamespace(create=lambda **kw: response))
+        with patch('src.enrich.ROOT', root), patch('src.enrich.read_rates', return_value=self.ledger.rates), patch('openai.OpenAI') as factory, patch('builtins.print') as output:
+            factory.return_value.__enter__.return_value = client
+            run(args)
+        self.assertIn('unavailable for 1 call(s)', self.printed(output))
+        self.assertIn('TOTAL UNKNOWN', self.printed(output))
+
+    def test_error_still_prints_final_summary(self):
+        root, args = self.summary_fixture()
+        args.limit = 0
+        with patch('src.enrich.ROOT', root), patch('openai.OpenAI') as factory, patch('builtins.print') as output:
+            with self.assertRaises(ValueError):
+                run(args)
+            factory.assert_not_called()
+        self.assertIn('Final summary', self.printed(output))
+        self.assertIn('Wall-clock seconds', self.printed(output))
+
 
 if __name__ == '__main__':
     unittest.main()
