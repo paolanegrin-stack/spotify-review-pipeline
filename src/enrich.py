@@ -148,8 +148,10 @@ def initialize(db):
 
 
 class Ledger:
-    def __init__(self, path, cap, rates):
+    def __init__(self, path, cap, rates, role='enrich', label_config=None):
         self.path, self.cap, self.rates = path, cap, rates
+        self.role = role
+        self.label_config = label_config or C.LABEL_CONFIG
         self.lock = threading.Lock()
         self.stopped = threading.Event()
 
@@ -168,8 +170,8 @@ class Ledger:
         cost = (tokens * max(self.rates['input'], self.rates.get('cached_input') or self.rates['input'])
                 + C.MAX_OUTPUT_TOKENS * self.rates['output']) / Decimal(1000000)
         call_id = 'local-' + uuid.uuid4().hex
-        event = dict(request_id=call_id, role='enrich', review_ids=[r['review_id'] for r in batch],
-                     model=C.MODEL, effort=C.EFFORT, label_config=C.LABEL_CONFIG, phase=phase,
+        event = dict(request_id=call_id, role=self.role, review_ids=[r['review_id'] for r in batch],
+                     model=C.MODEL, effort=C.EFFORT, label_config=self.label_config, phase=phase,
                      outcome='failed', error='in_flight_or_interrupted_usage_unknown',
                      input_tokens=None, cached_input_tokens=None, output_tokens=None,
                      latency_seconds=None, timestamp=datetime.now(timezone.utc).isoformat(),
@@ -183,7 +185,7 @@ class Ledger:
                 self.stopped.set()
                 raise BudgetStop(f'Budget stop: spent/reserved {spent} + next {cost} > cap {self.cap}')
             db.execute('INSERT INTO enrichment_calls VALUES (?,?,?)', (call_id, str(cost), canonical(event)))
-            for row in batch:
+            for row in batch if self.role == 'enrich' else []:
                 db.execute('UPDATE records SET attempts=attempts+1 WHERE text_sha256=? AND review_text=?',
                            (row['text_sha256'], row['review_text']))
             db.commit()
