@@ -28,6 +28,27 @@ def make_claims(ranking):
             for i, row in enumerate(ranking) for j, metric in enumerate(METRICS, 1)]
 
 
+def citation_data(pack):
+    totals = pack['run_totals']
+    agreement = (pack.get('verifier_agreement') or {}).get('agreement',{}).get('topic')
+    values = [('T1','rows',totals['rows'],'total rows'),
+              ('T2','completed',totals['completed'],'completed records'),
+              ('T3','quarantined',totals['quarantined'],'quarantined records'),
+              ('T4','needs_review',totals['needs_review'],'records needing review'),
+              ('T5','verifier_topic_agreement',agreement,'verifier topic agreement'),
+              ('T6','unresolved',totals['unresolved'],'unresolved records')]
+    total_claims = [dict(claim_id=cid,metric=metric,value=None if value is None else str(value))
+                    for cid,metric,value,_ in values]
+    snippets = [dict(claim_id=cid,snippet=f'{value} {label} [{cid}]')
+                for cid,_,value,label in values if value is not None]
+    templates = dict(complaint_count='{value} complaints [{id}]',severity_sum='severity sum {value} [{id}]',
+                     mean_severity='mean severity {value} [{id}]',priority_score='priority score {value} [{id}]')
+    snippets = [dict(claim_id=c['claim_id'],issue_id=c['issue_id'],
+                     snippet=templates[c['metric']].format(value=c['value'],id=c['claim_id']))
+                for c in pack['claims']] + snippets
+    return total_claims,snippets
+
+
 def build_pack(path):
     folder = path.parent
     with (folder / 'ranking.csv').open(encoding='utf-8', newline='') as stream:
@@ -96,9 +117,11 @@ def build_pack(path):
             agreement = {k: v for k, v in measured.items() if k != 'disagreements'}
     artifacts = {str(p.relative_to(folder)): file_sha(p) for p in
                  (folder/'ranking.csv',folder/'claims.csv',issues_file,prediction_file,sample_file) if p.is_file()}
-    return dict(ranking=ranking, claims=claims, issues=issues, representative_quotes=quotes,
+    pack = dict(ranking=ranking, claims=claims, issues=issues, representative_quotes=quotes,
                 run_totals=totals, verifier_agreement=agreement,
                 missing_issue_descriptions=missing_names, input_artifacts=artifacts)
+    pack['total_claims'],pack['citation_snippets'] = citation_data(pack)
+    return pack
 
 
 def eligible(pack):
@@ -107,6 +130,8 @@ def eligible(pack):
 
 
 def build_request(pack, errors=None):
+    pack = dict(pack)
+    pack['total_claims'],pack['citation_snippets'] = citation_data(pack)
     ids = [r['issue_id'] for r in pack['ranking']]
     # Empty packs can be previewed but are explicitly blocked from live execution.
     issue_schema = dict(type='string', **(dict(enum=ids) if ids else {}))
@@ -139,7 +164,8 @@ def check(payload, pack):
     text = payload['memo_markdown']
     if not isinstance(text, str) or not text.strip() or len(text) > C.MEMO_MAX_MARKDOWN_CHARS:
         return ['Invalid memo_markdown']
-    claims = {r['claim_id']: r for r in pack['claims']}
+    total_claims,snippets = citation_data(pack)
+    claims = {r['claim_id']: r for r in [*pack['claims'],*total_claims]}
     issue_ids = {r['issue_id'] for r in pack['ranking']}
     review_ids = {r['review_id'] for r in pack['representative_quotes']}
     recommendation = payload['recommended_issue_id']
@@ -181,27 +207,22 @@ def check(payload, pack):
     for rid in UUID.findall(text):
         if rid not in review_ids:
             problems.append('Unknown review ID in memo: ' + rid)
-    allowed_values = {Decimal(r['value']) for r in claims.values()} | numeric_values(pack['run_totals']) | numeric_values(pack.get('verifier_agreement'))
+    allowed_values = {Decimal(r['value']) for r in claims.values() if r['value'] is not None}
+    if '%' in text or re.search(r'\bpercent(?:age)?s?\b',text,re.I):
+        problems.append('Percentages are not allowed; copy the supplied snippet verbatim')
     for line in text.splitlines():
         scrubbed = line
-        identifiers = list(issue_ids | review_ids) + re.findall(r'\bC\d+\b',line) + UUID.findall(line)
+        for snippet in sorted((r['snippet'] for r in snippets),key=len,reverse=True):
+            scrubbed = scrubbed.replace(snippet,' ')
+        identifiers = list(issue_ids | review_ids) + re.findall(r'\b[CT]\d+\b',line) + UUID.findall(line)
         for identifier in sorted(set(identifiers), key=len, reverse=True):
             scrubbed = re.sub(r'(?<![\w-])' + re.escape(identifier) + r'(?![\w-])', ' ', scrubbed)
         for match in NUMBER.finditer(scrubbed):
             literal = match.group()
             value = Decimal(literal.replace(',',''))
-            before = scrubbed[:match.start()]
-            year = value == value.to_integral_value() and C.MEMO_YEAR_MIN <= value <= C.MEMO_YEAR_MAX and len(literal) == 4
-            position = 1 <= value <= 10 and value == value.to_integral_value() and re.search(r'(?:rank\s*#?|#)\s*$',before,re.I)
-            if year or position:
-                continue
             if value not in allowed_values:
                 problems.append('Invented numeric value: ' + literal)
-            supporting = [cid for bracket in re.findall(r'\[([^\]\n]+)\]',line)
-                          for cid in re.split(r'[,;\s]+',bracket.strip())
-                          if cid in claims and Decimal(claims[cid]['value']) == value]
-            if not supporting:
-                problems.append('Number lacks a matching same-line claim citation: ' + literal)
+            problems.append('Number must be copied with its complete citation snippet: ' + literal)
         if re.search(r'\d\s*(?:million|billion|thousand|[kKmMbB])\b', scrubbed):
             problems.append('Unsupported numeric magnitude abbreviation')
     return list(dict.fromkeys(problems))
@@ -246,9 +267,11 @@ def run(args):
             ledger.input_artifacts = pack['input_artifacts']
             problems, holder = [], {}
             for attempt in range(C.MEMO_VALIDATION_RETRIES+1):
+                holder.clear()
                 def validate(candidate):
                     holder['candidate'] = candidate
                     errors = check(candidate,pack)
+                    holder['errors'] = errors
                     if errors:
                         raise ValueError('; '.join(errors))
                     return candidate
@@ -260,7 +283,7 @@ def run(args):
                         result = send(build_request(pack,problems),[],ledger,args.phase,validate,client)
                 except ValueError as exc:
                     result = holder.get('candidate',{})
-                    problems = check(result,pack) or [str(exc)]
+                    problems = holder.get('errors') or [str(exc)]
                     save_memo(path,result,problems)
                     print(f'Memo failed checks on attempt {attempt+1}: ' + '; '.join(problems))
                     continue
@@ -270,7 +293,7 @@ def run(args):
                 print('Memo saved; all deterministic checks passed.')
                 return
             args.stage_failed = True
-            print('Memo saved as FAILED CHECKS after one validation retry.')
+            print(f'Memo saved as FAILED CHECKS after {C.MEMO_VALIDATION_RETRIES} validation retries.')
 
 
 def main():

@@ -125,9 +125,9 @@ def run(run_ids, budget, workers):
         latest = json.loads((folder/'run_summary.json').read_text(encoding='utf-8'))
         profile = json.loads((folder/'ingestion_report.json').read_text(encoding='utf-8'))
         source = records(folder,latest['label_config'])
-        source_name = {100:'cost_100.csv',500:'checkpoint_500.csv'}.get(len(source))
+        source_name = {100:'cost_100.csv',500:'checkpoint_500.csv',10000:'analysis_10000.csv'}.get(len(source))
         if source_name is None or len({r['review_id'] for r in source})!=len(source):
-            raise ValueError('Input must contain the 100-review pilot or 500-review checkpoint with unique source IDs')
+            raise ValueError('Input must contain a 100, 500 or 10,000-review course checkpoint with unique source IDs')
         expected = json.loads((ROOT/'data'/'manifest.json').read_text(encoding='utf-8'))['files'][source_name]['sha256']
         if profile['file_sha256']!=expected:
             raise ValueError('Input does not match the unchanged '+source_name+' checksum')

@@ -22,7 +22,10 @@ class LimiterTests(unittest.TestCase):
             limiter.acquire(1,stop)
             self.assertEqual(clock[0],120)
         self.assertEqual(C.TIMEOUT_SECONDS,120)
-        self.assertEqual((GLOBAL_LIMITER.rpm,GLOBAL_LIMITER.tpm),(2000,1200000))
+        self.assertEqual((GLOBAL_LIMITER.rpm,GLOBAL_LIMITER.tpm),(4000,1800000))
+        self.assertEqual(C.BATCH_SIZE,50)
+        self.assertEqual(C.VERIFY_BATCH_SIZE,25)
+        self.assertGreaterEqual(C.MAX_WORKERS,60)
 
     def test_worker_ledgers_share_the_same_limiter(self):
         first = Ledger(None,None,None)

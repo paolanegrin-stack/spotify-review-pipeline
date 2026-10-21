@@ -44,10 +44,23 @@ class MemoChecks(unittest.TestCase):
     def test_correct_numbers_accepted(self):
         self.assertEqual(memo.check(candidate(),pack()),[])
 
-    def test_years_and_rank_positions_accepted(self):
+    def test_other_years_and_rank_numbers_rejected_in_v2(self):
         value = candidate()
         value['memo_markdown'] += '\nHistorical snapshot from 2023. Consider rank 1.'
-        self.assertEqual(memo.check(value,pack()),[])
+        self.assertTrue(memo.check(value,pack()))
+
+    def test_v2_valid_total_snippets_and_invented_number(self):
+        evidence = pack()
+        evidence['verifier_agreement'] = dict(agreement=dict(topic=.9))
+        totals,snippets = memo.citation_data(evidence)
+        self.assertEqual([row['claim_id'] for row in totals[:5]],['T1','T2','T3','T4','T5'])
+        value = candidate()
+        copied = [s for s in snippets if s['claim_id'].startswith('T')]
+        value['memo_markdown'] += '\n' + '; '.join(s['snippet'] for s in copied)
+        value['cited_claim_ids'] += [s['claim_id'] for s in copied]
+        self.assertEqual(memo.check(value,evidence),[])
+        value['memo_markdown'] += '\n999 total rows [T1].'
+        self.assertTrue(any('Invented numeric value' in p for p in memo.check(value,evidence)))
 
     def test_invented_number_rejected_even_with_trailing_period(self):
         for number in ('999.','999 [C1].','.9 [C1].','999,999 [C1].'):
@@ -77,12 +90,13 @@ class MemoChecks(unittest.TestCase):
         value = candidate()
         value['memo_markdown'] = value['memo_markdown'].replace('[C1]','C1')
         value['cited_claim_ids'] = []
-        self.assertTrue(any('matching same-line claim citation' in p for p in memo.check(value,pack())))
+        self.assertTrue(any('complete citation snippet' in p for p in memo.check(value,pack())))
 
     def test_memo_effort_is_low_and_schema_strict(self):
         value = memo.build_request(pack())
         self.assertEqual(value['reasoning'],dict(effort='low'))
         self.assertTrue(value['text']['format']['strict'])
+        self.assertEqual(value['text']['format']['name'],'memo_v2')
 
 
 class PipelineTests(unittest.TestCase):
@@ -169,8 +183,9 @@ class PipelineTests(unittest.TestCase):
         with patch('src.memo.build_pack',return_value=evidence),patch('dotenv.load_dotenv'),patch('openai.OpenAI') as factory,patch.object(client.responses,'create',side_effect=[response(p) for p in responses]) as create,redirect_stdout(io.StringIO()):
             factory.return_value.__enter__.return_value = client
             memo.run(args)
-            self.assertEqual(create.call_count,2)
+            self.assertEqual(create.call_count,len(responses))
             self.assertIn('validation_error',json.loads(create.call_args.kwargs['input']))
+            self.assertEqual(json.loads(create.call_args.kwargs['input'])['validation_error'],memo.check(responses[-2],evidence))
         return args,evidence
 
     def test_memo_validation_retry_and_warm_reuse_log_low_effort(self):
@@ -188,10 +203,10 @@ class PipelineTests(unittest.TestCase):
             memo.run(args)
             client.assert_not_called()
 
-    def test_memo_failed_checks_saved_after_second_invalid_output(self):
+    def test_memo_failed_checks_saved_after_third_invalid_output(self):
         bad = candidate()
         bad['memo_markdown'] += '\n999 invented.'
-        args,_ = self.memo_mock_run([bad,bad])
+        args,_ = self.memo_mock_run([bad,bad,bad])
         folder = self.root/'runs'/self.args.run_id
         self.assertTrue(args.stage_failed)
         self.assertFalse(json.loads((folder/'memo_check.json').read_text(encoding='utf-8'))['passed'])

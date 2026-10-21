@@ -49,8 +49,8 @@ Conservative estimates add 20% API retries. Enrich seconds per call are divided
 by the modeled workers. Time does not depend on token prices. No network, API
 key or package installation is needed for replay, and importing makes no calls.
 
-The calculator also accepts `--runs ckpt_500` for checkpoint_500.csv. Its exports
-use the ckpt_500_ prefix so the real 100-review pilot artifacts are preserved.
-Live roles use a 120-second timeout and one shared 2,000 RPM / 1,200,000 TPM
+The calculator also accepts `--runs ckpt_500` or `--runs ckpt_10k` for the course
+checkpoints. Exports use the run-id prefix, preserving the 100-review pilot.
+Live roles use a 120-second timeout and one shared 4,000 RPM / 1,800,000 TPM
 limiter. Token admissions use the input byte bound plus output cap. The shared
 SQLite ledger reserves spend before dispatch; progress prints every 30 seconds.

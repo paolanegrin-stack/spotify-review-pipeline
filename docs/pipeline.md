@@ -40,15 +40,15 @@ and two alternatives among access, usability, playback and billing/support.
 Insufficient evidence is disclosed and blocks a live memo rather than inventing
 issues. The no-execute preview remains available with an empty evidence pack.
 
-Every reported numeric business statement requires a matching same-line [C#]
-claim citation. Run totals without an issue-level claim are described
-qualitatively in the memo. Numeric comparison uses Decimal; IDs are excluded
-from number scanning, with allowances for years and explicit rank positions.
+memo_v2 supplies verbatim citation snippets for issue metrics [C#] and run totals
+[T#]. Every number must be copied with its entire snippet and citation; other
+years, ranks, percentages or counts are rejected. T5 is verifier topic agreement;
+unavailable agreement is described qualitatively. IDs are excluded from number scanning.
 Unknown claims, reviews and issues are rejected. This deterministic check does
 not prove that prose, causal explanations or recommendations are sound.
 
-Failed memo validation is retried once with the errors, using the shared call
-log/ledger for each attempt. A second failure leaves memo.md headed FAILED
+Failed memo validation is retried twice with the exact error list, using the shared call
+log/ledger for each attempt. A third failure leaves memo.md headed FAILED
 CHECKS and memo_check.json with passed=false and the problems. Only validated
 memos enter the saved request cache. Unknown charges retain reservations.
 Memo role/effort and input-artifact hashes are included in its call events.
