@@ -65,9 +65,11 @@ def digest(value):
 
 
 def request(role, user, schema):
-    model = C.VERIFY_MODEL if role == 'verify' else C.GROUP_MODEL
-    effort = C.VERIFY_EFFORT if role == 'verify' else C.GROUP_EFFORT
-    version = C.VERIFY_PROMPT_VERSION if role == 'verify' else C.GROUP_PROMPT_VERSION
+    if role not in ('verify', 'group', 'memo'):
+        raise ValueError('Unsupported stage role')
+    model = getattr(C, role.upper() + '_MODEL')
+    effort = getattr(C, role.upper() + '_EFFORT')
+    version = getattr(C, role.upper() + '_PROMPT_VERSION')
     return dict(model=model, reasoning=dict(effort=effort), store=False,
                 instructions=(ROOT / 'prompts' / f'{version}.md').read_text(encoding='utf-8'),
                 input=canonical(user), max_output_tokens=C.MAX_OUTPUT_TOKENS,
@@ -112,7 +114,7 @@ def live_stage(path, role, cap):
             initialize(db)
             db.execute('''CREATE TABLE IF NOT EXISTS stage_cache (
                 role TEXT,cache_key TEXT,payload TEXT,PRIMARY KEY(role,cache_key))''')
-        config = C.VERIFY_LABEL_CONFIG if role == 'verify' else C.GROUP_LABEL_CONFIG
+        config = getattr(C, role.upper() + '_LABEL_CONFIG')
         ledger = Ledger(path, cap, read_rates(), role=role, label_config=config)
         with connect(path) as db:
             ledger.export(db)
@@ -172,10 +174,12 @@ def summary(args, role):
         before = snapshot(path)
         yield path
     except BudgetStop as exc:
+        args.spend_stopped = True
         print('Spend limit stopped ' + role + ': ' + str(exc))
     finally:
         print('Stage: ' + role)
+        unit = {'verify': 'reviews', 'group': 'issues', 'memo': 'memos'}[role]
         print(f'Stage units saved/reused: {getattr(args, "stage_completed", 0)}/'
               f'{getattr(args, "stage_total", "unavailable")} '
-              f'({"reviews" if role == "verify" else "issues"}); dry-run previews are not completions.')
+              f'({unit}); dry-run previews are not completions.')
         print_summary(args, path, before, started)

@@ -171,13 +171,15 @@ class Ledger:
                 + C.MAX_OUTPUT_TOKENS * self.rates['output']) / Decimal(1000000)
         call_id = 'local-' + uuid.uuid4().hex
         event = dict(request_id=call_id, role=self.role, review_ids=[r['review_id'] for r in batch],
-                     model=C.MODEL, effort=C.EFFORT, label_config=self.label_config, phase=phase,
+                     model=request['model'], effort=request['reasoning']['effort'], label_config=self.label_config, phase=phase,
                      outcome='failed', error='in_flight_or_interrupted_usage_unknown',
                      input_tokens=None, cached_input_tokens=None, output_tokens=None,
                      latency_seconds=None, timestamp=datetime.now(timezone.utc).isoformat(),
                      reserved_usd=str(cost), actual_cost_usd=None, request=request,
                      pricing_basis='user-supplied rates dated 2026-10-20; to confirm against the official page',
                      local_id_map={key: row['review_id'] for key, row in local.items()})
+        if hasattr(self, 'input_artifacts'):
+            event['input_artifacts'] = self.input_artifacts
         with self.lock, connect(self.path) as db:
             db.execute('BEGIN IMMEDIATE')
             spent = sum((Decimal(r[0]) for r in db.execute('SELECT liability_usd FROM enrichment_calls')), Decimal(0))
@@ -449,6 +451,7 @@ def execute_run(args):
         print('Real token counts come only from API response usage fields.')
         return
     if cap == 0:
+        args.spend_stopped = True
         print('Budget stop: default/explicit spend cap is zero; no API client or call created.')
         return
     lock_path = path.parent / '.enrich.lock'
@@ -485,6 +488,7 @@ def execute_run(args):
                     try:
                         future.result()
                     except BudgetStop as exc:
+                        args.spend_stopped = True
                         ledger.stopped.set()
                         print(str(exc))
                     except FatalAPIError as exc:

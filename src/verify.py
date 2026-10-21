@@ -146,6 +146,7 @@ def run(args):
             preview(build_request(selected[:C.VERIFY_BATCH_SIZE])[0])
             return
         if Decimal(args.max_spend_usd) == 0:
+            args.spend_stopped = True
             print('Spend limit stopped verify: zero budget; no calls.')
             return
         predictions = []

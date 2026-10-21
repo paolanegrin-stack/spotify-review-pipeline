@@ -77,6 +77,7 @@ def run(args):
             print('No completed complaints/cancellations to group; empty membership and issues saved.')
             return
         if Decimal(args.max_spend_usd) == 0:
+            args.spend_stopped = True
             print('Spend limit stopped group naming: zero budget; code-only membership saved; no calls.')
             return
         output = []
