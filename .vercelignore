@@ -1,0 +1,9 @@
+.env
+.env.*
+.venv/
+venv/
+runs/
+data/
+.git/
+*.db
+__pycache__/
