@@ -1,0 +1,216 @@
+{
+  "audit_script_sha256": "d60bd66d84922d934c65b3d42b2c7d36cc738e8c75e2d6f2b2f58bca3141c26d",
+  "audit_version": "a5-audit-v1",
+  "automatic_grade": null,
+  "calculated_ranking": [
+    {
+      "complaint_count": 12226,
+      "issue_id": "ISS-USABILITY",
+      "mean_severity": "2.625307",
+      "priority_score": 32097,
+      "rank": 1,
+      "severity_sum": 32097
+    },
+    {
+      "complaint_count": 12378,
+      "issue_id": "ISS-OTHER",
+      "mean_severity": "1.991679",
+      "priority_score": 24653,
+      "rank": 2,
+      "severity_sum": 24653
+    },
+    {
+      "complaint_count": 7555,
+      "issue_id": "ISS-BILLING",
+      "mean_severity": "2.774719",
+      "priority_score": 20963,
+      "rank": 3,
+      "severity_sum": 20963
+    },
+    {
+      "complaint_count": 6103,
+      "issue_id": "ISS-PLAYBACK",
+      "mean_severity": "3.287400",
+      "priority_score": 20063,
+      "rank": 4,
+      "severity_sum": 20063
+    },
+    {
+      "complaint_count": 2663,
+      "issue_id": "ISS-CATALOG",
+      "mean_severity": "2.782576",
+      "priority_score": 7410,
+      "rank": 5,
+      "severity_sum": 7410
+    },
+    {
+      "complaint_count": 1508,
+      "issue_id": "ISS-ACCESS",
+      "mean_severity": "3.820292",
+      "priority_score": 5761,
+      "rank": 6,
+      "severity_sum": 5761
+    },
+    {
+      "complaint_count": 954,
+      "issue_id": "ISS-DOWNLOADS",
+      "mean_severity": "3.036688",
+      "priority_score": 2897,
+      "rank": 7,
+      "severity_sum": 2897
+    },
+    {
+      "complaint_count": 96,
+      "issue_id": "ISS-SUPPORT",
+      "mean_severity": "2.750000",
+      "priority_score": 264,
+      "rank": 8,
+      "severity_sum": 264
+    }
+  ],
+  "coverage": {
+    "accounted_fraction": 1.0,
+    "duplicate_ids": 0,
+    "expected": 660622,
+    "invalid_or_unresolved": 0,
+    "labelable": 660609,
+    "labelable_completion_fraction": 0.151259,
+    "missing": 0,
+    "quarantined": 560699,
+    "received_lines": 660622,
+    "unique_expected_ids": 660622,
+    "valid_cache_reuses": 21901,
+    "valid_completed": 99923,
+    "valid_completion_fraction": 0.151256
+  },
+  "examples": [
+    {
+      "code": "unfinished_classification",
+      "detail": "560686"
+    },
+    {
+      "code": "resume_snapshot_mismatch",
+      "detail": "Need a nonempty checkpoint and additional completed IDs after resume."
+    },
+    {
+      "code": "invalid_usage",
+      "detail": "local-f8f2622cf4984d849f021943c83d8137"
+    },
+    {
+      "code": "invalid_usage",
+      "detail": "local-f8f2622cf4984d849f021943c83d8137"
+    },
+    {
+      "code": "invalid_usage",
+      "detail": "local-a58fc1239c4a43c38901bc6c1fde1669"
+    },
+    {
+      "code": "invalid_usage",
+      "detail": "local-a58fc1239c4a43c38901bc6c1fde1669"
+    },
+    {
+      "code": "invalid_usage",
+      "detail": "local-3c13ff57f8794b8f9c4b7ea3747f71ff"
+    },
+    {
+      "code": "invalid_usage",
+      "detail": "local-3c13ff57f8794b8f9c4b7ea3747f71ff"
+    },
+    {
+      "code": "invalid_usage",
+      "detail": "local-33891f4e405d443ab35835cab90f8765"
+    },
+    {
+      "code": "invalid_usage",
+      "detail": "local-33891f4e405d443ab35835cab90f8765"
+    },
+    {
+      "code": "invalid_usage",
+      "detail": "local-267dfc50162d43f6b75d888327c33fb1"
+    },
+    {
+      "code": "invalid_usage",
+      "detail": "local-267dfc50162d43f6b75d888327c33fb1"
+    },
+    {
+      "code": "reprocessed_checkpoint",
+      "detail": "local-834e5a61ea3c4afe8af0bc67041a70a1"
+    },
+    {
+      "code": "reprocessed_checkpoint",
+      "detail": "local-559591ec1d854484af177572899732d6"
+    },
+    {
+      "code": "reprocessed_checkpoint",
+      "detail": "local-f5e82592a9d146189c4a0d79194cb77f"
+    },
+    {
+      "code": "reprocessed_checkpoint",
+      "detail": "local-69d2907740034ebb96733f4de068ba8c"
+    },
+    {
+      "code": "reprocessed_checkpoint",
+      "detail": "local-242b9811db9a421c96aa231ddce6c587"
+    },
+    {
+      "code": "reprocessed_checkpoint",
+      "detail": "local-4dbd234a32d6443e9e3522891a2bc08b"
+    },
+    {
+      "code": "reprocessed_checkpoint",
+      "detail": "local-4344f98df3ad4f66bfbf130996c23dff"
+    },
+    {
+      "code": "reprocessed_checkpoint",
+      "detail": "local-29069855433c4db18e50df41ef34f900"
+    },
+    {
+      "code": "reprocessed_checkpoint",
+      "detail": "local-25d5746621b34e61a77d8f3dd5d78a62"
+    },
+    {
+      "code": "reprocessed_checkpoint",
+      "detail": "local-48ea808e6e0d4211969c7c41ea16eb9d"
+    },
+    {
+      "code": "resume_call_evidence",
+      "detail": "Need successful initial calls before the checkpoint and new completed calls after resume."
+    }
+  ],
+  "hash_convention": "Reference/benchmark: canonical UTF-8 JSON via canonical(); input files and audit script: exact bytes.",
+  "input_files_sha256": {
+    "calls.jsonl.gz": "fe5b74af2c83c22a3032141a1656f8a16f5ef17874f898f514d4eaffaf570aaa",
+    "checkpoint_after.json": "cf9e0700103f96f040a323cb6d5a4c15d506d40192195cad9f4063e406fa0cf6",
+    "checkpoint_before.json": "5f67acf3f9f37b5b10a745888d172617cd6901bfbf561f5d7cca85de848b9087",
+    "claims.csv": "035ef217e44192d6a8338af0703f21017181e1e36097a266b7356ea403879a67",
+    "ingestion.json": "68f7995588296dc3e2cce2674e9aa44009b1d5b1c489be021e981d2c6e3323d3",
+    "membership.csv": "5b989deb1353addfbb870414dee311949b49cd1355ff293323e8cde845cc5d39",
+    "memo_check.json": "43d195069683a949839e89fee361caba3628b34e1272a18a0aef4f493c05ec9b",
+    "ranking.csv": "bb095362e4ef05aa3d09aa92a7287683c7ddc24b74c75d71bd3cbc3be7e8eaa3",
+    "records.jsonl.gz": "0460532af6a98d220525253048f7bad5089eaa833f7767310f793c8a5ea9e7de",
+    "run.json": "8f0316d6797f0cb943de862972194b3ac5bd01ddb5e790f98d4327b3eee01248"
+  },
+  "issue_counts": {
+    "invalid_usage": 152,
+    "reprocessed_checkpoint": 2374,
+    "resume_call_evidence": 1,
+    "resume_snapshot_mismatch": 1,
+    "unfinished_classification": 1
+  },
+  "limits": [
+    "Artifacts do not prove actual model execution, authorship, cost, or independent verification.",
+    "Exact quote membership does not prove that the quote supports the label.",
+    "Claims export checks numbers; a person must check that all memo claims are represented.",
+    "Benchmark agreement is diagnostic; final 4/3/3 grades require rubric review."
+  ],
+  "quality": {
+    "official": false,
+    "status": "not_supplied"
+  },
+  "reference_sha256": "bb31d47db9b9a85cd97b3ba6e880915aff41a6127c3accee719c139ab34b7e97",
+  "reported_calls": 2624,
+  "reported_input_tokens": 6194601,
+  "reported_output_tokens": 3055268,
+  "status": "review_required",
+  "working_coverage_point_candidate": 0.4908
+}

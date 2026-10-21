@@ -4,11 +4,11 @@
 
 **Business question:** Where should the next quarter of product effort go among access, usability, playback, and billing/support?
 
-**10k checkpoint (final-run ranking pending).** Compare against **ISS-PLAYBACK**, with 626 complaints [C13] and priority score 2069 [C16], and **ISS-BILLING**, with 805 complaints [C9] and priority score 2256 [C12]. These are meaningful competing priorities, but their observed priority scores are below usability’s.
+**Final scoped run.** Prioritize **ISS-USABILITY**: complaints about limited control over playback and playlists have the strongest observed priority score among the compared issues. Evidence: “12226 complaints [C1]” and “priority score 32097 [C4]”. A representative review describes unexpected tracks in a liked-songs playlist [000c1149-e4a1-4bc0-8fb9-c17434dc67fc].
 
-These claim IDs refer to `runs/ckpt_10k/claims.csv`, not final-run claims. Final grouping, ranking and recommendation are still pending at this documentation snapshot. [Checkpoint memo copy](docs/final_memo.md).
+Claim IDs refer to the final [claims table](grading/claims.csv). [Final memo](docs/final_memo.md) · [Grading export](grading/) · [Live dashboard](https://spotify-review-pipeline-blue.vercel.app/) · [Dashboard setup](docs/dashboard.md)
 
-[Live dashboard](https://spotify-review-pipeline-blue.vercel.app/) · [Dashboard setup](docs/dashboard.md)
+The saved memo predates out-of-scope quarantine: its coverage references describe that earlier snapshot. Current accounting below supersedes those counts; the memo is copied unchanged and its issue-level claims are unchanged.
 
 ## 2. Scope and status
 
@@ -23,11 +23,13 @@ Read-only database inspection at this snapshot shows:
 | Scoped classified/completed | 99,923 |
 | Scoped quarantined after failures/retries | 77 |
 | Empty-text quarantines outside scope | 13 |
-| Remaining out-of-scope IDs | 560,609 pending |
+| Out-of-scope quarantines (`not_classified_out_of_declared_scope`) | 560,609 |
+| All quarantined IDs | 560,699 |
+| Pending IDs | 0 |
 
 The scoped quarantines retain their actual saved reasons: **50** `api_error:Request timed out.`, **26** `validation_failed:Quote must be a short exact source substring`, and **1** `validation_failed:Invalid JSON, refusal, or incomplete output`. The requested normalization to `enrich_failed_after_retries` changed no rows because no scoped pending records remained. There are no saved records with that normalized reason at this snapshot.
 
-The intended final accounting is to quarantine the remaining excluded IDs as `not_classified_out_of_declared_scope`, without labels or model calls. **That command has not yet been reflected in the saved database**; they must not be reported as already quarantined.
+Out-of-scope quarantine is complete, without labels or model calls. All **660,622** IDs are accounted for. The last `run_summary.json` predates this code-only update; current counts come from SQLite and are preserved in [grading/run.json](grading/run.json).
 
 ## 3. Architecture
 
@@ -73,44 +75,52 @@ The calculator currently supports the course development checkpoints, not direct
 
 ## 5. Results
 
-### 10k checkpoint (final-run ranking pending)
+### Final scoped-run ranking
 
-These rows are copied from `runs/ckpt_10k/ranking.csv`. Membership includes completed complaints and cancellations; praise, requests and unclear intent are excluded. Priority score is the severity sum, not revenue impact or a churn estimate.
+Copied from `runs/full_v1/ranking.csv`; committed [ranking.csv](grading/ranking.csv) is identical. Membership includes completed complaints and cancellations only. Priority score is severity sum, not revenue impact or observed churn.
 
 | Rank | Issue | Complaint/cancellation count | Severity sum | Mean severity | Priority score |
 |---|---|---:|---:|---:|---:|
-| 1 | ISS-USABILITY | 1246 | 3224 | 2.587480 | 3224 |
-| 2 | ISS-OTHER | 1217 | 2423 | 1.990961 | 2423 |
-| 3 | ISS-BILLING | 805 | 2256 | 2.802484 | 2256 |
-| 4 | ISS-PLAYBACK | 626 | 2069 | 3.305112 | 2069 |
-| 5 | ISS-CATALOG | 267 | 751 | 2.812734 | 751 |
-| 6 | ISS-ACCESS | 156 | 596 | 3.820513 | 596 |
-| 7 | ISS-DOWNLOADS | 92 | 280 | 3.043478 | 280 |
-| 8 | ISS-SUPPORT | 7 | 21 | 3.000000 | 21 |
+| 1 | ISS-USABILITY | 12226 | 32097 | 2.625307 | 32097 |
+| 2 | ISS-OTHER | 12378 | 24653 | 1.991679 | 24653 |
+| 3 | ISS-BILLING | 7555 | 20963 | 2.774719 | 20963 |
+| 4 | ISS-PLAYBACK | 6103 | 20063 | 3.287400 | 20063 |
+| 5 | ISS-CATALOG | 2663 | 7410 | 2.782576 | 7410 |
+| 6 | ISS-ACCESS | 1508 | 5761 | 3.820292 | 5761 |
+| 7 | ISS-DOWNLOADS | 954 | 2897 | 3.036688 | 2897 |
+| 8 | ISS-SUPPORT | 96 | 264 | 2.750000 | 264 |
 
-### Final-run verifier: partial saved results
+### Final independent verification
 
-The following is copied from `runs/full_v1/verify/disagreement_report.md`. It is an in-progress snapshot, not the final verification result:
+Copied from `runs/full_v1/verify/disagreement_report.md`:
 
 ```text
 # Independent verifier disagreements
 
 Seed: 20261020; requested: 2000; selected: 2000;
-compared: 1600; missing predictions: 400.
+compared: 2000; missing predictions: 0.
 Agreement is measured only over saved predictions; missing cases are explicitly excluded.
 
 | Field | Agreement |
 |---|---|
-| topic | 0.902500 |
-| intent | 0.960000 |
-| severity | 0.924375 |
-| sentiment | 0.826250 |
-| needs_review | 0.903750 |
+| topic | 0.909500 |
+| intent | 0.961000 |
+| severity | 0.925000 |
+| sentiment | 0.824500 |
+| needs_review | 0.907000 |
 
-Severity mean absolute error: 0.080625
+Severity mean absolute error: 0.079500
 ```
 
-Measured cost reports: [100-review cold/warm](cost/report.md), [500-review checkpoint](cost/ckpt_500_report.md), [10k checkpoint](cost/ckpt_10k_report.md). Historical full-corpus projections in those reports are estimates, not measured final-run totals; some scenarios remain UNKNOWN.
+### Golden-set evaluation
+
+All **50** student-labeled examples have saved predictions. Topic accuracy **24.00%**, macro F1 **0.176557**; intent accuracy **80.00%**, macro F1 **0.736551**; exact severity accuracy **62.00%**, severity MAE **0.600000**; joint topic/intent/severity accuracy **16.00%**. Topic agreement is poor and warrants human review. These are student-label diagnostics, not an instructor-approved benchmark or a grade. Missing predictions remain in accuracy/F1 denominators; MAE uses valid predictions only.
+
+[Metrics and per-case predictions](evals/golden_metrics.json) · [Confusion counts](evals/golden_confusion.csv) · [Human labels](evals/golden_50_human_labels.csv)
+
+[Offline injection test](evals/injection_test.json) passed prompt/data separation and simulated-output validation checks, with no model calls; it does **not** establish live-model injection resistance. The [synthetic planted-error test](evals/planted_error_test.json) flagged a deliberately wrong topic against a saved independent verifier prediction without changing business tables.
+
+Measured cost reports: [100-review cold/warm](cost/report.md), [500-review checkpoint](cost/ckpt_500_report.md), [10k checkpoint](cost/ckpt_10k_report.md). Historical full-corpus projections are estimates, not measured final-run totals.
 
 ## 6. Cost and time
 
@@ -124,9 +134,9 @@ USD values below are known API subtotals computed from saved usage, not a guaran
 | 10k, interrupted attempt | 0.07066771 | 1 | 118.32245 |
 | 10k, resumed attempt (report calls it warm) | 0.14777290 | 0 | 300.193342 |
 | 10k lifetime known subtotal | 0.21844061 | 1 | See separate attempts above |
-| full_v1, latest saved lifetime cost / last saved interrupted invocation time | 1.93155401 | 76 | 2059.334633 |
+| full_v1, lifetime known cost / completed invocation time | 1.97843941 | 76 | 1265.823879 |
 
-The warm 100-review replay made no new enrichment calls. The 10k resumed attempt is **not** a warm-cache benchmark: it continued incomplete work. The original 500-review memo failed its checks. Final-run cost/time is provisional: its last saved summary is still marked `interrupted`, and verify/group/memo are running or pending; `2059.334633` seconds is not the complete end-to-end runtime. The subsequent saved enrichment stage took **93.501143** seconds with no new calls and no new completions. Unknown calls retain conservative spend reservations; reservations are not measured charges.
+The warm 100-review replay made no new enrichment calls. The 10k resumed attempt is **not** a warm-cache benchmark: it continued incomplete work. The original 500-review memo failed its checks. The final run is marked **completed**. Its **1265.823879** seconds cover the completed invocation; the prior saved interrupted invocation took **2059.334633** seconds. Complete elapsed time across all launches is unavailable because the initial forced interruption did not save a full invocation summary. Lifetime cost includes all saved model stages, plus **76** calls with unknown charges. Spend/reservations are **USD 2.55352471**, which is not a measured bill. Unknown usage remains unknown.
 
 ## 7. Resume demo
 
@@ -134,18 +144,33 @@ Saved snapshots report `checkpoint_before.json`: **99,923** completed at `2026-1
 
 The first interruption was a **forced double Ctrl+C**, followed by resume from saved state (operator-provided history). **No screen recording is available.** The current snapshots have equal completion counts, so they do not prove an increase in completed records across this particular pair. They must not be presented as a complete interruption-demo submission. The code supports graceful first-Ctrl+C draining and forced exit on a second Ctrl+C, but that capability is distinct from recorded evidence.
 
-## 8. Known gaps
+## 8. Audit status and known gaps
 
-- Final grouping, ranking, memo and complete cost/time summary are pending. Refresh the checkpoint fallback once the final artifacts exist.
-- Out-of-scope pending IDs have not yet been quarantined; scoped failures retain their original detailed reasons rather than the requested normalized label.
-- Human labels are copied to [evals/golden_50_human_labels.csv](evals/golden_50_human_labels.csv); golden-set evaluation metrics have not been computed.
-- A saved injection-test evaluation is not present. Prompt protection is implemented, but it is not empirical injection-test evidence.
-- Planted-error comparison code and unit tests exist; a saved final-run planted-error demonstration/report has not been produced.
-- `grading/` exports are not produced yet, and `data/check_submission.py` has not been run against a final submission.
-- Resume evidence lacks a screen recording and the saved snapshots do not show additional completions.
-- Live dashboard availability and its loaded data freshness were not checked during this offline documentation update.
+Part B is complete as an offline evaluation/export, not as a claim that every course requirement passes. The unmodified course checker returned **review_required**. [Full self-check report](evals/course_self_check.json).
 
-Part B evaluation, export and checker work has deliberately not been started here.
+- Coverage: **660,622** unique source IDs, **0** missing, **0** duplicates, **99,923** valid completed records, **560,699** valid quarantines, **0** invalid/unresolved exports, and **21,901** valid exact-text cache reuses. No source-hash, schema, membership, ranking, claims, or missing-role errors were reported.
+- `unfinished_classification`: the checked-in full-corpus contract still expects every nonempty review; **560,686** nonempty IDs are not completed. The declared minimum scope does not make this checker requirement disappear.
+- `invalid_usage`: **152** missing input/output usage-field flags across **76** calls. Unknown charges remain unknown rather than being fabricated as zero.
+- `resume_snapshot_mismatch` and `resume_call_evidence`: before/after snapshots have equal completion counts. `reprocessed_checkpoint` flags **2,374** resume call entries referencing IDs present in the saved before snapshot. This snapshot contains the final completion set, so it is inconsistent with the earlier call timeline and cannot demonstrate the claimed interruption boundary. Original snapshots/logs were preserved, not rewritten to pass.
+- No screen recording is available. A new live demonstration was not attempted because this task permits no paid calls.
+- The injection test is an offline structural/simulated-response test; live-model robustness remains unmeasured.
+- Golden topic accuracy is low; human/model disagreements need review. Human labels were not silently revised, and no instructor-approved benchmark was claimed.
+- The memo and last run summary predate out-of-scope quarantine: memo totals of **90** quarantined and **560,609** unresolved describe the earlier snapshot, not current accounting. Current exported status counts are correct. The memo and original summary were not rewritten as if generated later.
+- Complete elapsed time across all launches is unavailable; live dashboard availability and loaded-data freshness were not checked.
+
+### Reproduce Part B without model calls
+
+After the run is idle:
+
+```powershell
+.\.venv\Scripts\python -m src.audit --run-id full_v1
+.\.venv\Scripts\python data/check_submission.py profile --full data/spotify_reviews_18months.csv --out grading/ingestion.json
+.\.venv\Scripts\python data/check_submission.py reference --full data/spotify_reviews_18months.csv --analysis data/spotify_reviews_18months.csv --out runs/audit_full_v1/reference.json
+.\.venv\Scripts\python data/check_submission.py check --reference runs/audit_full_v1/reference.json --submission grading --out evals/course_self_check.json
+.\.venv\Scripts\python -m unittest discover -s tests -q
+```
+
+The reference remains outside the grading folder and is ignored by Git. Golden evaluation is separate from the course checker because student labels are not an instructor-approved benchmark. `src.audit` exports final durable SQLite call events, including failed/unknown-usage attempts, without changing the original run or emitting new calls.
 
 ## 9. Limitations and data source
 
@@ -159,4 +184,4 @@ Source: BwandoWando, [3.4 Million Spotify Google Store Reviews](https://www.kagg
 1fc85de68a304dd8978b537cfa58793d5f41cbaf417fa32cb53899f83a2fcef6
 ```
 
-Raw input and runtime artifacts remain local; they are not committed to this repository. The dashboard exposes saved outputs, not raw CSV download access.
+Raw input and the local reference remain untracked. The compact [grading export](grading/) includes every original ID and saved execution evidence, with large JSONL files gzip-compressed. Human labels and grading artifacts are excluded from Vercel deployment. The dashboard exposes saved outputs, not raw CSV download access.

@@ -1,0 +1,15 @@
+{
+  "synthetic": true,
+  "live_model_test": false,
+  "api_calls": 0,
+  "passed": true,
+  "checks": {
+    "review_text_is_data": true,
+    "local_id_only": true,
+    "hostile_text_not_in_system_instructions": true,
+    "foreign_id_rejected": true,
+    "foreign_label_rejected": true,
+    "valid_response_accepted": true
+  },
+  "limitation": "Tests prompt/data separation and validator boundaries with simulated outputs; does not establish live-model injection resistance."
+}

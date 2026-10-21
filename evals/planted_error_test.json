@@ -1,0 +1,14 @@
+{
+  "synthetic": true,
+  "business_tables_modified": false,
+  "review_id": "9ab549de-1d98-4197-b84f-4a0d6a78c272",
+  "planted_topic": "access",
+  "verifier_topic": "other",
+  "flagged": true,
+  "differences": {
+    "topic": {
+      "enricher": "access",
+      "verifier": "other"
+    }
+  }
+}

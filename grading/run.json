@@ -1,0 +1,22 @@
+{
+  "version": "a5-audit-v1",
+  "run_id": "full_v1",
+  "analysis_count": 660622,
+  "analysis_sha256": "1fc85de68a304dd8978b537cfa58793d5f41cbaf417fa32cb53899f83a2fcef6",
+  "classification_input_fields": [
+    "review_text"
+  ],
+  "allow_multi_issue": false,
+  "declared_scope": {
+    "count": 100000,
+    "method": "Lowest SHA-256(seed + colon + review_id) among nonempty reviews",
+    "seed": "berkeley-fall-2026-assignment-5-v1",
+    "ids_file": "scope_ids.txt",
+    "ids_sha256": "232fcf9350302869ecaf243956fbd4e112b8c9447e259f82a6e5b61f0d1ce6e4"
+  },
+  "final_status_counts": {
+    "quarantined": 560699,
+    "completed": 99923
+  },
+  "calls_source": "Final durable SQLite enrichment_calls events; failed attempts and unknown usage retained"
+}

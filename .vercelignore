@@ -7,3 +7,5 @@ data/
 .git/
 *.db
 __pycache__/
+evals/
+grading/
