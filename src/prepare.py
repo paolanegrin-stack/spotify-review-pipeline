@@ -121,8 +121,12 @@ def prepare(input_path, run_id):
                         rows_per_calendar_month=manifest['reviews_by_month'],
                         min_timestamp=manifest['window']['first_review'],
                         max_timestamp=manifest['window']['last_review'])
-        print('Check | Actual | Expected | Result')
-        print('--- | --- | --- | ---')
+        if input_path.name != manifest['assignment_scope']['final_input']:
+            expected = {}
+            print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+        if expected:
+            print('Check | Actual | Expected | Result')
+            print('--- | --- | --- | ---')
         for key, value in expected.items():
             result = 'PASS' if report[key] == value else 'FAIL'
             checks.append(dict(check=key, actual=report[key], expected=value, result=result))
